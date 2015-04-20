@@ -1,0 +1,4 @@
+netifaces
+docopt
+pexpect
+beautifulsoup4

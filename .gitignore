@@ -2,3 +2,5 @@
 *.swp
 .idea
 images
+src/dbling_conf.json
+src/chrome_ext.db
