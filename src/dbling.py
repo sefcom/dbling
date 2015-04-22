@@ -13,6 +13,7 @@ import netifaces
 import os
 from os import path
 import pexpect
+from pexpect import pxssh
 import re
 import sqlite3
 import subprocess
@@ -95,7 +96,6 @@ class ChromeRunner(object):
         if self._chrome is not None and self._chrome.isalive():
             return
         self._chrome = pexpect.spawn('google-chrome' + self.display)
-        logging.info('Chrome running on display ' + self.display.rsplit(':', 1)[1])
 
     def stop(self):
         if self._chrome is None or not self._chrome.isalive():
@@ -126,16 +126,16 @@ class Dbling(object):
         if imgvault_addr is None:
             imgvault_addr = get_imgvault_addr()
 
-        args = "ssh -i {0!s} {1!s}@{2!s}".format(id_file, username, imgvault_addr)
-        self._vault = pexpect.spawn(args)
+        self._vault = pxssh.pxssh()
+        self._vault.login(imgvault_addr, username, ssh_key=id_file)
         # Ensure we're logged in and everything is ready for us to send commands
-        self._vault.expect(self._prompt)
+        self._vault.prompt()
         logging.info('SSH into ImgVault machine complete.')
 
         logging.info('Starting ImgVault and connecting to the hypervisor.')
-        self._vault.write('cd $IMGVAULT_SRC\n')
-        self._vault.expect(self._prompt)
-        self._vault.write('python vault.py\n')
+        self._vault.sendline('cd $IMGVAULT_SRC')
+        self._vault.prompt()
+        self._vault.sendline('python vault.py')
         self._vault.expect(self._img_prompt)
         logging.info('ImgVault ready.')
 
@@ -144,7 +144,7 @@ class Dbling(object):
         pexpect.run('xpra start :%d' % self._display)
         self._chrome = ChromeRunner(self._display)
         if TEST:
-            input("xpra started on %d. Connect with `xpra attach ssh:USERNAME@REMOTE:DISPLAY and press Enter "
+            input("xpra started on %d. Connect with `xpra attach ssh:USERNAME@REMOTE:DISPLAY` and press Enter "
                   "when you're ready to continue." % self._display)
 
         db_name = path.join(path.dirname(path.realpath(__file__)), 'chrome_ext.db')
@@ -164,15 +164,17 @@ class Dbling(object):
 
         # Store the path to the sitemap, directory for extensions
         self._sitemap_path = path.join(path.dirname(path.realpath(__file__)), '../', 'chrome_sitemap.xml')
-        self._ext_dir = '/opt/google/chrome/extensions/'
-        if not path.exists(self._ext_dir):
-            args = ['mkdir', self._ext_dir]
-            if os.geteuid() != 0:
-                args = ['sudo'] + args
-            ret = subprocess.call(args, shell=True)  # Should return 0
-            if ret:
-                logging.critical('Failed to create the directory for extension JSON files: %s', self._ext_dir)
-                raise ChildProcessError("Couldn't make the directory: %s" % self._ext_dir)
+        self._ext_dir = '/opt/google/chrome/extensions/'  # TODO: Cut out the code that uses this
+        self._check_make_dir(self._ext_dir, 'extension JSON files', True)
+
+        self._policy_dir = '/etc/opt/chrome'
+        self._check_make_dir(self._policy_dir, 'policy management', True)
+        self._policy_dir += '/policies'
+        self._check_make_dir(self._policy_dir, 'policy management', True)
+        self._check_make_dir(self._policy_dir + '/recommended', 'policy management', True)
+        self._policy_dir += '/managed'
+        self._check_make_dir(self._policy_dir, 'policy management', True)
+        self._policy_dir += '/'
 
         # Times to sleep to let things do their work (seconds)
         self._install_time_driver = 0  # TODO
@@ -181,10 +183,9 @@ class Dbling(object):
     def deinit(self):
         logging.info('Deinit called. Shutting down SSH connection.')
         if self._vault.isalive():
-            self._vault.write('q\n')
-            self._vault.expect(self._prompt)
-            self._vault.write('exit\n')
-            self._vault.expect(pexpect.EOF)
+            self._vault.sendline('q')
+            self._vault.prompt()
+            self._vault.logout()
 
         logging.info('Shutting down Chrome/xpra.')
         self._chrome.deinit()
@@ -195,6 +196,31 @@ class Dbling(object):
         self._conn.close()
 
         logging.info('De-initialization complete. Exiting.')
+
+    def _check_make_dir(self, new_dir, descr='', sudo=False):
+        """
+        Check if the new_dir exists, create it if it doesn't.
+
+        :param new_dir: The directory to check the existence of
+        :type new_dir: str
+        :param descr: A description of the directory (for logging)
+        :type descr: str
+        :param sudo: Whether new_dir should be created with the sudo command
+        :type sudo: bool
+        :return: None
+        :rtype: None
+        """
+        if path.exists(new_dir):
+            return
+        args = 'mkdir %s' % new_dir
+        if sudo:
+            args = 'sudo ' + args
+        ret = subprocess.call(args, shell=True)  # Should return 0
+        if ret:
+            if len(descr):
+                descr = ' for ' + descr
+            logging.critical('Failed to create directory%s: %s' % (descr, new_dir))
+            raise ChildProcessError("Couldn't make the directory: %s" % self._policy_dir)
 
     def _profile(self, ext_tag):
         """
@@ -217,12 +243,12 @@ class Dbling(object):
         # TODO: Do some sanitization of the extension's ID before we use it in system calls
         fname = path.join(self._ext_dir, e_id + '.json')
         # Create the file
-        ret = subprocess.call(['sudo', 'touch', fname], shell=True)  # Should return 0
+        ret = subprocess.call('sudo touch %s' % fname, shell=True)  # Should return 0
         if ret:
             logging.critical('%s I: Failed to create extension JSON file at %s.' % (short_e_id, fname))
             raise ChildProcessError("Couldn't create file: %s" % fname)
         # Change the permissions on the file
-        ret = subprocess.call(['sudo', 'chmod', '666', fname], shell=True)
+        ret = subprocess.call('sudo chmod 666 %s' % fname, shell=True)
         if ret:
             logging.critical('%s I: Failed to give 666 permissions to the extension JSON file at %s.' %
                              (short_e_id, fname))
@@ -231,7 +257,7 @@ class Dbling(object):
             ext_info = {'external_update_url': 'https://clients2.google.com/service/update2/crx'}
             json.dump(ext_info, fout)
         # Restrict permissions on the file now that we've written its contents
-        ret = subprocess.call(['sudo', 'chmod', '644', fname], shell=True)
+        ret = subprocess.call('sudo chmod 644 %s' % fname, shell=True)
         if ret:
             logging.warning('%s I: Failed to give 644 permissions to the extension JSON file at %s.' %
                             (short_e_id, fname))
@@ -239,6 +265,7 @@ class Dbling(object):
         ##################
         # STEP 2: Start Chrome on the driver, and let Chrome install it, sync with cloud
         self._chrome.start()
+        logging.info('Chrome running on display %d' % self._display)
         if TEST:
             start_time = time()
             input('Press Enter to continue.')
@@ -251,8 +278,8 @@ class Dbling(object):
         ##################
         # STEP 3: Start up target instance into a "running" snapshot (so we don't have to log in), let it sync
         # with the cloud and install the extension, estimated <time> minutes
-        self._vault.write('start target current\n')
-        self._vault.expect(self._prompt)
+        self._vault.sendline('start target current')
+        self._vault.expect(self._img_prompt)
         if TEST:
             start_time = time()
             input('Press Enter to continue.')
@@ -276,23 +303,23 @@ class Dbling(object):
 
         ##################
         # STEP 6: Snapshot the target while it's running (see #3)
-        self._vault.write('snapshot target\n')  # TODO: Double-check that this blocks until the snapshot is complete
+        self._vault.sendline('snapshot target')  # TODO: Double-check that this blocks until the snapshot is complete
         self._vault.expect(self._name_prompt)
-        self._vault.write('%s_inst\n' % e_id)
-        self._vault.expect(self._prompt)
+        self._vault.sendline('%s_inst' % e_id)
+        self._vault.expect(self._img_prompt)
         logging.info('%s I: Snapshot taken after installation on target.' % short_e_id)
 
         ##################
         # STEP 7: Shut down the target
-        self._vault.write('close target\n')
+        self._vault.sendline('close target')
         self._vault.expect(self._name_prompt)
         logging.info('%s I: Target shut down.' % short_e_id)
 
         ##################
         # STEP 8: Attach the target's disk to the driver
-        self._vault.write('disk to driver\n')
+        self._vault.sendline('disk to driver')
         dev_path = self._validate_dev_path(self._vault.readline())
-        self._vault.expect(self._prompt)
+        self._vault.expect(self._img_prompt)
         logging.info('%s I: Target disk now attached at %s.' % (short_e_id, dev_path))
 
         ##################
@@ -314,15 +341,15 @@ class Dbling(object):
 
         ##################
         # STEP 12: Delete the disk image
-        ret = subprocess.call(['sudo', 'rm', img_path])  # Should return 0
+        ret = subprocess.call('sudo rm %s' % img_path)  # Should return 0
         if ret:
             logging.critical('%s I: Failed to delete image file: %s' % (short_e_id, img_path))
             raise ChildProcessError("Couldn't delete image file: %s" % img_path)
 
         ##################
         # STEP 13: Detach the target's disk from the driver
-        self._vault.write('disk to target\n')
-        self._vault.expect(self._prompt)
+        self._vault.sendline('disk to target')
+        self._vault.expect(self._img_prompt)
         logging.info('%s I: Target disk now detached from driver.' % short_e_id)
 
         ##################
@@ -334,16 +361,15 @@ class Dbling(object):
 
         ##################
         # STEP 14: Delete the JSON file for the extension
-        ret = subprocess.call(['sudo', 'rm', fname])
+        ret = subprocess.call('sudo rm %s' % fname)
         if ret:
             logging.critical('%s U: Failed to delete extension JSON file at %s.' % (short_e_id, fname))
             raise ChildProcessError("Couldn't delete extension JSON file: %s" % fname)
 
         ##################
         # STEP 15: Start Chrome on the driver, and let Chrome uninstall the extension, sync with cloud
-
-        # TODO
-
+        self._chrome.start()
+        logging.info('Chrome running on display %d' % self._display)
         if TEST:
             start_time = time()
             input('Press Enter to continue.')
@@ -355,8 +381,8 @@ class Dbling(object):
         ##################
         # STEP 16: Start up target instance from the snapshot (probably just a rollback/revert), let it sync
         # with the cloud and uninstall the extension, estimated <time> minutes
-        self._vault.write('start target current\n')
-        self._vault.expect(self._prompt)
+        self._vault.sendline('start target current')
+        self._vault.expect(self._img_prompt)
         if TEST:
             start_time = time()
             input('Press Enter to continue.')
@@ -377,26 +403,31 @@ class Dbling(object):
 
         ##################
         # STEP 19: Snapshot the target
-        self._vault.write('snapshot target\n')
+        self._vault.sendline('snapshot target')
         self._vault.expect(self._name_prompt)
-        self._vault.write('%s_uninst\n' % e_id)
-        self._vault.expect(self._prompt)
+        self._vault.sendline('%s_uninst' % e_id)
+        self._vault.expect(self._img_prompt)
         logging.info('%s U: Snapshot taken after un-installation from target.' % short_e_id)
 
         ##################
         # STEP 20: Shut down the target
-        self._vault.write('close target\n')
+        self._vault.sendline('close target')
         self._vault.expect(self._name_prompt)
         logging.info('%s U: Target shut down.' % short_e_id)
 
         ##################
         # STEP 21: Attach, image, DFXML similar to previous
-        self._vault.write('disk to driver\n')
-        dev_path = self._vault.readline()
-        self._vault.expect(self._prompt)
+        self._vault.sendline('disk to driver')
+        dev_path = self._validate_dev_path(self._vault.readline())
+        self._vault.expect(self._img_prompt)
         logging.info('%s U: Target disk now attached at %s.' % (short_e_id, dev_path))
-        # TODO
 
+        chew = Chew(dev_path)  # Yes, we do actually want a brand new instance
+        img_path = chew.do_acquisition(chew.now)
+        logging.info('%s U: Disk image created at: %s' % (short_e_id, img_path))
+
+        dfxml_path = chew.do_dfxml()
+        logging.info('%s U: DFXML file created at: %s' % (short_e_id, dfxml_path))
 
         ##################
         # STEP 22: Update the database
@@ -405,12 +436,15 @@ class Dbling(object):
 
         ##################
         # STEP 23: Delete the disk image
-
+        ret = subprocess.call('sudo rm %s' % img_path)  # Should return 0
+        if ret:
+            logging.critical('%s U: Failed to delete image file: %s' % (short_e_id, img_path))
+            raise ChildProcessError("Couldn't delete image file: %s" % img_path)
 
         ##################
         # STEP 24: Detach the target's disk
-        self._vault.write('disk to target\n')
-        self._vault.expect(self._prompt)
+        self._vault.sendline('disk to target')
+        self._vault.expect(self._img_prompt)
         logging.info('%s U: Target disk now detached from driver.' % short_e_id)
 
     def profile_random(self, limit=None):
@@ -430,7 +464,7 @@ class Dbling(object):
         while len(exts) < limit:
             e = delete_me.pop(0)
             e_id = e.loc.string.rsplit('/', 1)[1]
-            cur.execute('SELECT id FROM exts WHERE id=?', e_id)
+            cur.execute('SELECT id FROM exts WHERE id=?', (e_id,))
             if cur.fetchone() is not None:
                 # This is not the extension you're looking for
                 # because it's already in the database
@@ -475,7 +509,11 @@ def main():
         # TODO: Make a prompt that fills in this configuration file if it's missing
         conf = json.load(fin)
 
-    dbing = Dbling(conf['id_file'], conf['username'])
+    dbling = Dbling(conf['id_file'], conf['username'])
+    try:
+        dbling.profile_random(1)
+    except KeyboardInterrupt:
+        dbling.deinit()
 
     # TODO: Start the loop of picking an extension, installing it, waiting for the changes to take place on the
     # target, shutting down the target, detaching its disk, ...
