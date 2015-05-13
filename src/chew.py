@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
 Usage: chew [-q|-u] TARGET_DEVICE [OUTPUT_FILE]
 
@@ -14,6 +14,7 @@ General flow:
 """
 
 from datetime import datetime
+import logging
 from os import path
 import pyuefi
 import subprocess
@@ -36,6 +37,7 @@ class Chew(object):
         self.partition = self.uefi.get_part_by_name('STATE')
         self.lba_start = self.partition['lba_start']
         self.lba_end = self.partition['lba_end']
+        self.state_dev_path = self.partition['dev_path']
 
         self.now = datetime.now()
 
@@ -47,7 +49,7 @@ class Chew(object):
             self.do_acquisition(self.now)
             self.do_dfxml()
 
-    def do_acquisition(self, stamp=None):
+    def do_acquisition(self, stamp=None, dd=False):
         """
         Try acquisition with ewfacquire first, then use dd if it fails.
 
@@ -56,9 +58,12 @@ class Chew(object):
         :return: The file name of the image. (full path, with file extension)
         :rtype: str
         """
-        try:
-            self._img = self._do_ewf_acquisition(stamp)
-        except ChildProcessError:
+        if not dd:
+            try:
+                self._img = self._do_ewf_acquisition(stamp)
+            except ChildProcessError:
+                dd = True
+        if dd:
             self._img = self._do_dd_acquisition(stamp)
         return self._img
 
@@ -71,6 +76,7 @@ class Chew(object):
         :return: The file name of the image. (full path, with file extension)
         :rtype: str
         """
+        # Here we're using sectors to reference the start and length
         len_of_partition = (self.lba_end - self.lba_start + 1)
         partition_offset = self.lba_start
 
@@ -82,16 +88,25 @@ class Chew(object):
             image_file = self.uefi.uefi_header['disk_guid']
         image_file = path.join(self._img_dir, image_file + '.img')
 
-        # TODO: Figure out all the parameters we want to use for dd
-        args = ['sudo', 'dd',
-                'if=%s' % self.dev,
-                'of=%s' % image_file
-                ]
+        if self.state_dev_path is None:
+            args = 'sudo dd if={source:s} of={dest:s} skip={offset:d} count={num_blocks:d} ibs={bs:d} obs={bs:d}'
+            args = args.format(source=self.dev,
+                               dest=image_file,
+                               offset=partition_offset,
+                               num_blocks=len_of_partition,
+                               bs=SECTOR_SIZE)
+        else:
+            logging.info('Determined that the STATE partition is located at %s' % self.state_dev_path)
+            args = 'sudo dd if={source:s} of={dest:s}'.format(source=self.state_dev_path, dest=image_file)
 
         # Not sure if we need to pipe any I/O
-        proc = subprocess.call(args)
-        if not proc:
+        mbytes = len_of_partition*SECTOR_SIZE/(1024*1024)
+        logging.info("Acquiring STATE partition using dd. ({:,.1f} MB)".format(mbytes))
+        proc = subprocess.call(args, shell=True)  # Should return 0
+        if proc:
             # TODO Call didn't go well. Handle this.
+            print("Acquisition returned the following code:")
+            print(proc)
             raise ChildProcessError
 
         return image_file
@@ -129,7 +144,7 @@ class Chew(object):
 
         # Not sure if we need to pipe any I/O
         proc = subprocess.call(args)
-        if not proc:
+        if proc:
             # TODO Call didn't go well. Handle this.
             raise ChildProcessError
 
@@ -151,17 +166,17 @@ class Chew(object):
         _img = image_file.rsplit('.', 1)[0]
         self._dfxml = _img + '.df.xml'
 
-        args = ['fiwalk',
-                '-g',  # Don't get the file data, just metadata
-                '-z',  # Don't calculate checksums for the files
-                '-G0',  # Process files of all sizes
-                '-x',  # Output to stdout (only way to not get the DTD)
-                '%s' % image_file,  # Disk image
-                '> %s' % self._dfxml]  # DFXML file output
+        args = 'fiwalk -g -z -G0 -x %s > %s' % (image_file, self._dfxml)
+        # -g    Don't get the file data, just metadata
+        # -z    Don't calculate checksums for the files
+        # -G0   Process files of all sizes
+        # -x    Output to stdout (only way to not get the DTD)
+        # %s    Disk image
+        # > %s  DFXML file output
 
         # Not sure if we need to pipe any I/O
-        proc = subprocess.call(args)
-        if not proc:
+        proc = subprocess.call(args, shell=True)
+        if proc:
             # TODO Call didn't go well. Handle this.
             raise ChildProcessError
         return self._dfxml

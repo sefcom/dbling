@@ -2,3 +2,4 @@ netifaces
 docopt
 pexpect
 beautifulsoup4
+requests
