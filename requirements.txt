@@ -5,3 +5,4 @@ beautifulsoup4
 requests
 matplotlib
 networkx
+pyparsing==1.5.7
