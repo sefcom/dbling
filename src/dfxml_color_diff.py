@@ -1,5 +1,10 @@
 #!/usr/bin/env python
 """
+Usage: dfxml_color_diff.py [-f FILE]
+
+Options:
+  -f FILE   Save duplicate data to FILE
+
 Requires packages:
 graphviz-dev
 python-pydot
@@ -7,6 +12,7 @@ python-pydot
 
 from colorama import init, Back, Fore  # BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE, RESET
 from copy import deepcopy as copy
+from docopt import docopt
 from hashlib import sha256
 from io import StringIO
 import json
@@ -58,6 +64,10 @@ def make_black(text, b=True):
     return _color_it(text, 'BLACK', b)
 
 
+class DuplicatesCompleted(Exception):
+    pass
+
+
 class FileObj(object):
 
     def __init__(self, element_obj, namespace=''):
@@ -86,11 +96,11 @@ class FileObj(object):
 
 class ColorDiff(object):
 
-    def __init__(self):
+    def __init__(self, dupl_file=None):
         self.digr = networkx.DiGraph()
-        self.files = {}
         self.type_count = {}
-        self.unknown_type_files = []
+        self.home_node_label = None
+        self.dupl_file = dupl_file
 
         # Initialize logging
         self._log_path = path.join(path.dirname(path.realpath(__file__)), '../log', "color_diff.log")
@@ -100,66 +110,66 @@ class ColorDiff(object):
         logging.basicConfig(filename=self._log_path, level=logging.DEBUG, format=log_format)
         logging.info('DFXML Color Diff initialized.')
 
-    def deinit(self, clean=True):
+    def deinit(self, clean=True, dup=False):
         if clean:
             logging.info('Execution completed cleanly. Shutting down.')
+        elif dup:
+            logging.info('Exiting. Duplicates written to file: %s' % self.dupl_file)
         else:
             logging.warning('Unclean shutdown. Did not finish graphing the diffs.')
         logging.shutdown()  # Flush and close all handlers
 
     def show_graph(self, fig_filename):
-        fileobject_types = ['encrypted files', 'encrypted directories', 'unencrypted files', 'unencrypted directories']
-
         # Generate positions for all the nodes, edges
         pos = networkx.pydot_layout(self.digr, prog='dot', root='home')
 
-        for n in self.unknown_type_files:
-            networkx.draw_networkx_nodes(self.digr, pos, nodelist=self.unknown_type_files,
-                                         node_color='c', node_shape='s')
-
         # TODO: If this needs to support more than MAX_FILES==3, rewrite this
-        for t, s in zip(range(4), ('h', 'd', 'o', '^')):
-            # Iterate over the four types of files:
-            # 0: encrypted_files
-            # 1: encrypted_directories
-            # 2: unencrypted_files
-            # 3: unencrypted_directories
-            logging.info('Drawing nodes for %s' % fileobject_types[t])
+        num_drawn = 0.0  # To get floating point answer when dividing later
+        next_logged = 0.25
+        for node, node_data in self.digr.nodes_iter(True):
+            # Reset variables, just in case
+            color = shape = None
 
-            # Only in file 1. Draw with shape s and color 'r'
-            l = self.files[1][t] - self.files[2][t]# - self.files[3][t]
-            networkx.draw_networkx_nodes(self.digr, pos, nodelist=l, node_color='r', node_shape=s)
-            logging.debug('File 1 - File 2 - File 3')
+            # How many files was this a part of?
+            if len(node_data["src_files"]) >= 2:
+                color = 'purple'
+            elif 1 in node_data["src_files"]:
+                color = 'r'  # Red
+            elif 2 in node_data["src_files"]:
+                color = 'b'  # Blue
 
-            # Only in file 2. Draw with shape s and color 'b'
-            l = self.files[2][t] - self.files[1][t]# - self.files[3][t]
-            networkx.draw_networkx_nodes(self.digr, pos, nodelist=l, node_color='b', node_shape=s)
-            logging.debug('File 2 - File 1 - File 3')
+            # File, directory, or other? Was it encrypted or not?
+            for t in node_data['type']:
+                # May redraw the same node multiple times, but that's better than losing data in the graph
+                if t == FILE:
+                    if node_data['encrypted']:
+                        shape = 'h'  # Hexagon
+                    else:
+                        shape = 'o'  # Circle
 
-            # Only in file 3. Draw with shape s and color 'y'
-            # l = self.files[3][t] - self.files[2][t] - self.files[1][t]
-            # networkx.draw_networkx_nodes(self.digr, pos, nodelist=l, node_color='y', node_shape=s)
-            # logging.debug('File 3 - File 2 - File 1')
+                elif t == DIRECTORY:
+                    if node_data['encrypted']:
+                        shape = 'd'  # Diamond
+                    else:
+                        shape = '^'  # Triangle
+                else:
+                    # Unknown file types
+                    color = 'c'
+                    shape = 's'
 
-            # In files 1 & 2. Draw with shape s and color 'purple'
-            l = self.files[1][t] & self.files[2][t]# - self.files[3][t]
-            networkx.draw_networkx_nodes(self.digr, pos, nodelist=l, node_color='purple', node_shape=s)
-            logging.debug('File 1 & File 2')
+                networkx.draw_networkx_nodes(self.digr, pos, [node], node_color=color, node_shape=shape)
 
-            # In files 2 & 3. Draw with shape s and color 'g'
-            # l = self.files[2][t] & self.files[3][t] - self.files[1][t]
-            # networkx.draw_networkx_nodes(self.digr, pos, nodelist=l, node_color='g', node_shape=s)
-            # logging.debug('File 2 & File 3 - File 1')
-
-            # In files 1 & 3. Draw with shape s and color 'c'
-            # l = self.files[1][t] & self.files[3][t] - self.files[2][t]
-            # networkx.draw_networkx_nodes(self.digr, pos, nodelist=l, node_color='c', node_shape=s)
-            # logging.debug('File 1 & File 3 - File 2')
-
-            # In files 1 & 2 & 3. Draw with shape s and color '0.5'
-            # l = self.files[1][t] & self.files[2][t] & self.files[3][t]
-            # networkx.draw_networkx_nodes(self.digr, pos, nodelist=l, node_color='0.5', node_shape=s)
-            # logging.debug('File 1 & File 2 & File 3')
+            # Log progress
+            num_drawn += 1
+            if (num_drawn/len(self.digr)) >= next_logged:
+                per = str(int(next_logged*100)) + '%'
+                logging.debug('Drawn %s of the nodes in the graph (%d/%d)' % (per, num_drawn, len(self.digr)))
+                if next_logged == 0.25:
+                    next_logged = 0.5
+                elif next_logged == 0.5:
+                    next_logged = 0.75
+                elif next_logged == 0.75:
+                    next_logged = 1.0
 
         # Continue drawing here
         logging.info('Drawing edges, then saving the image.')
@@ -169,13 +179,17 @@ class ColorDiff(object):
         plt.savefig(fig_filename)
         plt.show()
 
-    def add_from_file(self, file_path):
+    def add_from_file(self, file_path, img_file_id=0):
         """
         Given the path to a DFXML file, add nodes and edges to the digraph
         representing its fileobjects.
 
         :param file_path: Path to the DFXML file from which to create the digraph.
         :type file_path: str
+        :param img_file_id: ID number for the image file being processed. Used
+                            to identify file objects that are common or unique
+                            to each of the images.
+        :type img_file_id: int
         :return: None
         :rtype: None
         """
@@ -183,7 +197,7 @@ class ColorDiff(object):
         xml_tree_root = etree.parse(file_path).getroot()
         ns = '{http://www.forensicswiki.org/wiki/Category:Digital_Forensics_XML}'
         vol = xml_tree_root.find(ns + 'volume')
-        logging.info('DFXML converted to element tree. Importing into a graph.')
+        logging.info('DFXML converted to element tree. Importing into the graph.')
 
         ex_pat1 = re.compile('/\.\.?$')
         ex_pat2 = re.compile('^/?home/\.shadow/(.+)')
@@ -193,11 +207,6 @@ class ColorDiff(object):
 
         # Node info storage
         inode_paths = {}
-        encrypted_files = []
-        encrypted_directories = []
-        unencrypted_files = []
-        unencrypted_directories = []
-        other_files = []
         duplicates = []
         self.type_count = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0}
 
@@ -207,21 +216,12 @@ class ColorDiff(object):
         num_unallocated = 0
         num_unused = 0
 
-        # Figure out which file this is: 1, 2, or 3
-        file_num = None
-        for i in range(1, MAX_FILES+1):
-            try:
-                self.files[i]
-            except KeyError:
-                file_num = i  # This is the one we want
-                break
-
         for file_obj in vol.iterfind(ns + 'fileobject'):
             file_obj = FileObj(file_obj, ns)
 
             # Get the filename
             try:
-                filename = file_obj.findtext('filename')
+                filename = unicode(file_obj.findtext('filename'))
             except AttributeError:
                 filename = None
 
@@ -258,7 +258,7 @@ class ColorDiff(object):
 
             # TODO: Figure out what to do with any files that passed tests up to this point but don't have a name
             if filename is None:
-                filename = etree.tostring(file_obj.find('id'))
+                filename = unicode(etree.tostring(file_obj.find('id')))
                 print(filename)  # TODO: Remove this
 
             # Exclude all files that end in '/.' or '/..'
@@ -266,9 +266,11 @@ class ColorDiff(object):
                 continue
 
             skip_add_edge = False
+            is_home = False
             if re.search(ex_pat3, filename):
                 # Include 'home' and 'home/.shadow' so that other file objects can create edges with them
                 skip_add_edge = True
+                is_home = True
             elif re.search(ex_pat4, filename):
                 pass
             elif not re.search(ex_pat2, filename):
@@ -277,13 +279,12 @@ class ColorDiff(object):
 
             # Extract all pertinent information
             inode_num = int(file_obj.findtext('inode'))
-
             basename = path.basename(filename)
             parent_obj = int(file_obj.find('parent_object').findtext(ns + 'inode'))
             meta_type = int(file_obj.findtext('meta_type'))
             self.type_count[meta_type] += 1
             encrypted = bool(re.search(enc_pat5, filename))
-            filename_id = sha256(filename).hexdigest()
+            filename_id = sha256(filename.encode('utf-8')).hexdigest()
 
             fs_offset = float('inf')
             for fs in file_obj.iter_grandchild('byte_runs', 'byte_run'):
@@ -317,11 +318,14 @@ class ColorDiff(object):
                      "filename_id": filename_id,
                      "filename_end": filename[-13:],
                      "name_type": file_obj.findtext('name_type'),
-                     "type": meta_type,
+                     "type": (meta_type,),  # Needs to be hashable for Graphviz to not choke
                      "alloc": alloc,
                      "used": used,
                      "fs_offset": fs_offset,
                      "filesize": filesize,
+                     "src_files": (img_file_id,),  # Needs to be hashable for Graphviz to not choke
+                     "encrypted": encrypted,
+                     "eval": None,  # Used for trimming the graph
                      }
 
             # Stubborn parameters
@@ -347,28 +351,20 @@ class ColorDiff(object):
             else:
                 _id = basename
 
+            if is_home:
+                self.home_node_label = _id
+
             if inode_num in inode_paths and inode_paths[inode_num] != _id:
                 num_duplicate_parent_dirs += 1
             else:
                 inode_paths[inode_num] = _id
 
-            if meta_type == FILE:
-                if encrypted:
-                    encrypted_files.append(_id)
-                else:
-                    unencrypted_files.append(_id)
-            elif meta_type == DIRECTORY:
-                if encrypted:
-                    encrypted_directories.append(_id)
-                else:
-                    unencrypted_directories.append(_id)
-            else:
-                other_files.append(_id)
-
             # Make sure we don't try to double-add a node in the digraph
             if self.digr.has_node(_id):
                 num_skipped_files += 1
-                if file_num == 1:
+                self.digr.node[_id]["type"] += (meta_type,)
+                self.digr.node[_id]["src_files"] += (img_file_id,)
+                if img_file_id == 1:
                     # Save information on the duplicates for printing later
                     duplicates.append((self.digr.node[_id], attrs))
                 continue
@@ -379,7 +375,7 @@ class ColorDiff(object):
                 edges_to_add.append((parent_obj, _id))
 
         logging.info("Done importing.")
-        logging.debug("Number of skipped files: %d" % num_skipped_files)
+        logging.debug("Number of skipped (duplicate) files: %d" % num_skipped_files)
         logging.debug("Number of unallocated files: %d" % num_unallocated)
         logging.debug("Number of allocated but unused files: %d" % num_unused)
         logging.debug("Number of duplicate parent directory entries: %d" % num_duplicate_parent_dirs)
@@ -387,11 +383,9 @@ class ColorDiff(object):
         type_sum = 0
         for i in self.type_count:
             type_sum += self.type_count[i]
-        logging.info("Total file objects: %d" % type_sum)
+        logging.info("Total imported file objects: %d" % type_sum)
 
-        if file_num == 1:
-            # TODO: Make this optional (CLI param) and output to a file instead of stdout
-            print("\nDuplicates:"),
+        if img_file_id == 1 and self.dupl_file is not None:
             dstring = ' '
             d_fields = (('inode', '6'), ('parent_inode', '6'), ('name_type', '2'), ('type', '2'), ('alloc', '2'),
                         ('used', '2'), ('mode', '5'), ('nlink', '3'), ('uid', '5'), ('gid', '5'), ('fs_offset', '12'),
@@ -403,42 +397,58 @@ class ColorDiff(object):
                                 "Length", "Modified Time", "inode Changed Time", "Accessed Time", "Created Time",
                                 "Filename Hash Tail", "Filename Tail")
             break_str = make_green(('--   ' * ((len(header) / 5) + 1))[:len(header)], 0)
-            header = make_yellow(make_black(header, 0))
+            header = make_yellow(make_black(header, 0)) + '\n'
             line_count = 0
-            for x, y in duplicates:
-                print('')
-                if not line_count % 10:
-                    print(header)
-                line_count += 1
 
-                x_fields = []
-                y_fields = []
-                for k, n in d_fields:
-                    if k == 'filename_id':
-                        # Display only the last n characters of the hash
-                        xf = x[k][0-int(n):]
-                        yf = y[k][0-int(n):]
-                    else:
-                        xf = x[k]
-                        yf = y[k]
+            with open(self.dupl_file, 'w') as dout:
+                dout.write("\nDuplicates:"),
+                for x, y in duplicates:
+                    dout.write('\n')
+                    if not line_count % 10:
+                        dout.write(header)
+                    line_count += 1
 
-                    if xf == '?':
-                        xf = make_cyan(('% ' + n + 's') % '?', 0)
-
-                    x_fields.append(xf)
-
-                    if xf == yf:
-                        y_fields.append(yf)
-                    else:
-                        if y[k] == '?':
-                            y_fields.append(make_blue(' ' * (int(n) - 1) + make_cyan('?', 0)))
+                    x_fields = []
+                    y_fields = []
+                    for k, n in d_fields:
+                        if k == 'filename_id':
+                            # Display only the last n characters of the hash
+                            xf = x[k][0-int(n):]
+                            yf = y[k][0-int(n):]
                         else:
-                            y_fields.append(make_blue(('% ' + n + 's') % yf))
+                            xf = x[k]
+                            yf = y[k]
+                            if k == 'type':
+                                if len(xf) > 2:
+                                    xf = '!' + str(xf[0])
+                                elif len(xf) == 2:
+                                    xf = str(xf[0]) + str(xf[1])
+                                else:
+                                    xf = xf[0]
 
-                print(dstring % tuple(x_fields))
-                print(dstring % tuple(y_fields))
-                print(break_str),
-            raise KeyboardInterrupt
+                                if len(yf) > 1:
+                                    yf = '!' + str(yf[0])
+                                else:
+                                    yf = yf[0]
+
+                        if xf == '?':
+                            xf = make_cyan(('% ' + n + 's') % '?', 0)
+
+                        x_fields.append(xf)
+
+                        if xf == yf:
+                            y_fields.append(yf)
+                        else:
+                            if y[k] == '?':
+                                y_fields.append(make_blue(' ' * (int(n) - 1) + make_cyan('?', 0)))
+                            else:
+                                y_fields.append(make_blue(('% ' + n + 's') % yf))
+
+                    dout.write(dstring % tuple(x_fields) + '\n')
+                    dout.write(dstring % tuple(y_fields) + '\n')
+                    dout.write(break_str)
+                dout.write('\n\n')
+            raise DuplicatesCompleted
 
         for u, v in edges_to_add:
             if INODE_ONLY:
@@ -446,25 +456,86 @@ class ColorDiff(object):
             else:  # Includes when HASH_LABEL == True
                 self.digr.add_edge(inode_paths[u], v)
 
-        self.files[file_num] = (set(encrypted_files),
-                                set(encrypted_directories),
-                                set(unencrypted_files),
-                                set(unencrypted_directories))
-        self.unknown_type_files += other_files
-
     def trim_unuseful(self):
+        """
+        Remove unuseful nodes from the graph. This is the entry point to the
+        recursive method _check_eval() that starts the process with all the
+        child nodes of "home".
 
+        :return: None
+        :rtype: None
+        """
+        if self.home_node_label is None:
+            raise TypeError('Must generate the graph before trimming it.')
+
+        deg_before = len(self.digr)
+
+        for n in self.digr.successors_iter(self.home_node_label):
+            # This should only have one item (.shadow), but just in case...
+            self._check_eval(n)
+
+        deg_diff = deg_before - len(self.digr)
+
+        logging.info('Finished trimming %d unuseful nodes from the graph. Distinct nodes and their parents remain.'
+                     % deg_diff)
+
+    def _check_eval(self, node):
+        """
+        Recursively search successor nodes, evaluating their usefulness. A
+        node is useful if:
+
+        1. Any of its children are useful, or
+        2. It was listed in fewer than the max number of files (it changed at
+           some point)
+
+        :param node: Label of the node to evaluate.
+        :type node: str
+        :return: True (useful, keep) or False (not useful, delete)
+        :rtype: bool
+        """
+        # Check if this node has already been evaluated
+        if self.digr.node[node]["eval"] is not None:
+            logging.debug('Skipping eval of node: %s' % node)
+            return self.digr.node[node]["eval"]
+
+        # If this node is useful by itself, no need to check its children
+        if len(self.digr.node[node]["src_files"]) < MAX_FILES:
+            logging.debug('Skipping eval of child nodes of node: %s' % node)
+            self.digr.node[node]["eval"] = True
+            return True
+
+        children_to_remove = []
+        any_children_true = False
+        for c in self.digr.successors_iter(node):
+            e = self._check_eval(c)
+            if not e:
+                children_to_remove.append(c)
+            any_children_true = any_children_true or e
+
+        # Remove unneeded children
+        self.digr.remove_nodes_from(children_to_remove)
+
+        self.digr.node[node]["eval"] = any_children_true
+        return any_children_true
 
 
 def main():
-    with open(path.join(path.dirname(path.realpath(__file__)), 'dbling_conf.json')) as fin:
-        img_dir = json.load(fin)['img_dir']
+    args = docopt(__doc__)
+
+    try:
+        img_dir = os.environ['DBLING_IMGS']
+        if not path.isdir(img_dir):
+            raise KeyError
+    except KeyError:
+        with open(path.join(path.dirname(path.realpath(__file__)), 'dbling_conf.json')) as fin:
+            img_dir = json.load(fin)['img_dir']
+
     imgs = os.listdir(img_dir)
     imgs.sort(reverse=True)
     to_compare = []
     dfxml_ext = re.compile('\.df\.xml$')
 
-    diff = ColorDiff()
+    diff = ColorDiff(dupl_file=args['-f'])
     for i in imgs:
         i_pth = path.join(img_dir, i)
         # For info on what this does and what it means, see:
@@ -485,14 +556,18 @@ def main():
             break
 
     to_compare.sort()
-    for i in to_compare:
+    for i, n in zip(to_compare, range(len(to_compare))):
         try:
-            diff.add_from_file(i)
+            diff.add_from_file(i, n+1)
+        except DuplicatesCompleted:
+            diff.deinit(False, dup=True)
+            return
         except:
             diff.deinit(False)
             raise
 
     try:
+        diff.trim_unuseful()
         diff.show_graph('testfig.png')
     except:
         diff.deinit(False)
