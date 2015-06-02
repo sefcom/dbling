@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Usage: dfxml_color_diff.py [-f FILE]
+Usage: color_diff.py [-f FILE]
 
 Options:
   -f FILE   Save duplicate data to FILE
