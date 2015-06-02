@@ -386,75 +386,88 @@ class ColorDiff(object):
         logging.info("Total imported file objects: %d" % type_sum)
 
         if img_file_id == 1 and self.dupl_file is not None:
-            dstring = ' '
-            d_fields = (('inode', '6'), ('parent_inode', '6'), ('name_type', '2'), ('type', '2'), ('alloc', '2'),
-                        ('used', '2'), ('mode', '5'), ('nlink', '3'), ('uid', '5'), ('gid', '5'), ('fs_offset', '12'),
-                        ('filesize', '8'), ('mtime', '20'), ('ctime', '20'), ('atime', '20'), ('crtime', '20'),
-                        ('filename_id', '18'), ('filename_end', '13'))
-            for k, n in d_fields:
-                dstring += '% ' + n + 's|'
-            header = dstring % ("inode", "pinode", "nt", "ty", "al", "ud", "mode", "nlk", "uid", "gid", "Start",
-                                "Length", "Modified Time", "inode Changed Time", "Accessed Time", "Created Time",
-                                "Filename Hash Tail", "Filename Tail")
-            break_str = make_green(('--   ' * ((len(header) / 5) + 1))[:len(header)], 0)
-            header = make_yellow(make_black(header, 0)) + '\n'
-            line_count = 0
-
-            with open(self.dupl_file, 'w') as dout:
-                dout.write("\nDuplicates:"),
-                for x, y in duplicates:
-                    dout.write('\n')
-                    if not line_count % 10:
-                        dout.write(header)
-                    line_count += 1
-
-                    x_fields = []
-                    y_fields = []
-                    for k, n in d_fields:
-                        if k == 'filename_id':
-                            # Display only the last n characters of the hash
-                            xf = x[k][0-int(n):]
-                            yf = y[k][0-int(n):]
-                        else:
-                            xf = x[k]
-                            yf = y[k]
-                            if k == 'type':
-                                if len(xf) > 2:
-                                    xf = '!' + str(xf[0])
-                                elif len(xf) == 2:
-                                    xf = str(xf[0]) + str(xf[1])
-                                else:
-                                    xf = xf[0]
-
-                                if len(yf) > 1:
-                                    yf = '!' + str(yf[0])
-                                else:
-                                    yf = yf[0]
-
-                        if xf == '?':
-                            xf = make_cyan(('% ' + n + 's') % '?', 0)
-
-                        x_fields.append(xf)
-
-                        if xf == yf:
-                            y_fields.append(yf)
-                        else:
-                            if y[k] == '?':
-                                y_fields.append(make_blue(' ' * (int(n) - 1) + make_cyan('?', 0)))
-                            else:
-                                y_fields.append(make_blue(('% ' + n + 's') % yf))
-
-                    dout.write(dstring % tuple(x_fields) + '\n')
-                    dout.write(dstring % tuple(y_fields) + '\n')
-                    dout.write(break_str)
-                dout.write('\n\n')
-            raise DuplicatesCompleted
+            self._save_duplicate_info(duplicates)
 
         for u, v in edges_to_add:
             if INODE_ONLY:
                 self.digr.add_edge(u, v)
             else:  # Includes when HASH_LABEL == True
                 self.digr.add_edge(inode_paths[u], v)
+
+    def _save_duplicate_info(self, duplicates):
+        """
+        Create a file containing information about the duplicates in the DFXML
+        that was processes. Output file's path should have been passed to the
+        class constructor on instantiation.
+
+        :param duplicates: List of 2-tuples of the vertex indices.
+        :type duplicates: list
+        :return: None
+        :rtype: None
+        """
+        dstring = ' '
+        d_fields = (('inode', '6'), ('parent_inode', '6'), ('name_type', '2'), ('type', '2'), ('alloc', '2'),
+                    ('used', '2'), ('mode', '5'), ('nlink', '3'), ('uid', '5'), ('gid', '5'), ('fs_offset', '12'),
+                    ('filesize', '8'), ('mtime', '20'), ('ctime', '20'), ('atime', '20'), ('crtime', '20'),
+                    ('filename_id', '18'), ('filename_end', '13'))
+        for k, n in d_fields:
+            dstring += '% ' + n + 's|'
+        header = dstring % ("inode", "pinode", "nt", "ty", "al", "ud", "mode", "nlk", "uid", "gid", "Start",
+                            "Length", "Modified Time", "inode Changed Time", "Accessed Time", "Created Time",
+                            "Filename Hash Tail", "Filename Tail")
+        break_str = make_green(('--   ' * ((len(header) / 5) + 1))[:len(header)], 0)
+        header = make_yellow(make_black(header, 0)) + '\n'
+        line_count = 0
+
+        with open(self.dupl_file, 'w') as dout:
+            dout.write("\nDuplicates:"),
+            for x, y in duplicates:
+                dout.write('\n')
+                if not line_count % 10:
+                    dout.write(header)
+                line_count += 1
+
+                x_fields = []
+                y_fields = []
+                for k, n in d_fields:
+                    if k == 'filename_id':
+                        # Display only the last n characters of the hash
+                        xf = x[k][0-int(n):]
+                        yf = y[k][0-int(n):]
+                    else:
+                        xf = x[k]
+                        yf = y[k]
+                        if k == 'type':
+                            if len(xf) > 2:
+                                xf = '!' + str(xf[0])
+                            elif len(xf) == 2:
+                                xf = str(xf[0]) + str(xf[1])
+                            else:
+                                xf = xf[0]
+
+                            if len(yf) > 1:
+                                yf = '!' + str(yf[0])
+                            else:
+                                yf = yf[0]
+
+                    if xf == '?':
+                        xf = make_cyan(('% ' + n + 's') % '?', 0)
+
+                    x_fields.append(xf)
+
+                    if xf == yf:
+                        y_fields.append(yf)
+                    else:
+                        if y[k] == '?':
+                            y_fields.append(make_blue(' ' * (int(n) - 1) + make_cyan('?', 0)))
+                        else:
+                            y_fields.append(make_blue(('% ' + n + 's') % yf))
+
+                dout.write(dstring % tuple(x_fields) + '\n')
+                dout.write(dstring % tuple(y_fields) + '\n')
+                dout.write(break_str)
+            dout.write('\n\n')
+        raise DuplicatesCompleted
 
     def trim_unuseful(self):
         """
