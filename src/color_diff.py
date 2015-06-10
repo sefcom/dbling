@@ -36,33 +36,17 @@ INODE_ONLY = False
 HASH_LABEL = True
 
 
-def _color_it(text, color, b):
-    bf = bool(b) and Back or Fore
-    return getattr(bf, color) + str(text) + bf.RESET
-
-
-def make_yellow(text, b=True):
-    return _color_it(text, 'YELLOW', b)
-
-
-def make_red(text, b=True):
-    return _color_it(text, 'RED', b)
-
-
-def make_blue(text, b=True):
-    return _color_it(text, 'BLUE', b)
-
-
-def make_green(text, b=True):
-    return _color_it(text, 'GREEN', b)
-
-
-def make_cyan(text, b=True):
-    return _color_it(text, 'CYAN', b)
-
-
-def make_black(text, b=True):
-    return _color_it(text, 'BLACK', b)
+class Clr:
+    _color_it = lambda t, c, b: getattr(bool(b) and Back or Fore, c) + str(t) + \
+                                getattr(bool(b) and Back or Fore, 'RESET')
+    black = lambda t, b=True: Clr._color_it(t, 'BLACK', b)
+    red = lambda t, b=True: Clr._color_it(t, 'RED', b)
+    green = lambda t, b=True: Clr._color_it(t, 'GREEN', b)
+    yellow = lambda t, b=True: Clr._color_it(t, 'YELLOW', b)
+    blue = lambda t, b=True: Clr._color_it(t, 'BLUE', b)
+    magenta = lambda t, b=True: Clr._color_it(t, 'MAGENTA', b)
+    cyan = lambda t, b=True: Clr._color_it(t, 'CYAN', b)
+    white = lambda t, b=True: Clr._color_it(t, 'WHITE', b)
 
 
 class DuplicatesCompleted(Exception):
@@ -490,8 +474,8 @@ class ColorDiff(object):
         header = dstring % ("inode", "pinode", "nt", "ty", "al", "ud", "mode", "nlk", "uid", "gid", "Start",
                             "Length", "Modified Time", "inode Changed Time", "Accessed Time", "Created Time",
                             "Filename Hash Tail", "Filename Tail")
-        break_str = make_green(('--   ' * ((len(header) / 5) + 1))[:len(header)], False)
-        header = make_yellow(make_black(header, False)) + '\n'
+        break_str = Clr.green(('--   ' * ((len(header) / 5) + 1))[:len(header)], False)
+        header = Clr.yellow(Clr.black(header, False)) + '\n'
         line_count = 0
 
         with open(self.dupl_file, 'w') as dout:
@@ -528,7 +512,7 @@ class ColorDiff(object):
                                 yf = yf[0]
 
                     if xf == '?':
-                        xf = make_cyan(('% ' + n + 's') % '?', False)
+                        xf = Clr.cyan(('% ' + n + 's') % '?', False)
 
                     x_fields.append(xf)
 
@@ -536,9 +520,9 @@ class ColorDiff(object):
                         y_fields.append(yf)
                     else:
                         if y[k] == '?':
-                            y_fields.append(make_blue(' ' * (int(n) - 1) + make_cyan('?', False)))
+                            y_fields.append(Clr.blue(' ' * (int(n) - 1) + Clr.cyan('?', False)))
                         else:
-                            y_fields.append(make_blue(('% ' + n + 's') % yf))
+                            y_fields.append(Clr.blue(('% ' + n + 's') % yf))
 
                 dout.write(dstring % tuple(x_fields) + '\n')
                 dout.write(dstring % tuple(y_fields) + '\n')
