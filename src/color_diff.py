@@ -3,8 +3,9 @@
 Usage: color_diff.py [options]
 
 Options:
-  -f FILE   Save duplicate data to FILE
-  -d        Show only files at a depth below home >= the Extensions dir (7)
+ -f FILE   Save duplicate data to FILE
+ -d        Show only files at a depth below home >= the Extensions dir (7)
+ -v        Set logging level from INFO to DEBUG
 
 """
 
@@ -85,7 +86,7 @@ class FileObj(object):
 
 class ColorDiff(object):
 
-    def __init__(self, dupl_file=None):
+    def __init__(self, dupl_file=None, verbose_log=False):
         self.digr = gt.Graph()
         self.type_count = {}
         self.home_vertex = None
@@ -131,7 +132,11 @@ class ColorDiff(object):
         with open(self._log_path, 'a') as fout:
             fout.write((' --  '*15)+'\n')
         log_format = '%(asctime)s %(levelname) 8s -- %(message)s'
-        logging.basicConfig(filename=self._log_path, level=logging.DEBUG, format=log_format)
+        if verbose_log:
+            log_level = logging.DEBUG
+        else:
+            log_level = logging.INFO
+        logging.basicConfig(filename=self._log_path, level=log_level, format=log_format)
         logging.info('DFXML Color Diff initialized.')
 
     def deinit(self, clean=True, dup=False):
@@ -608,11 +613,9 @@ class ColorDiff(object):
         return any_children_true
 
 
-def main():
-    global MIN_DEPTH
-    args = docopt(__doc__)
-
+def main(args):
     # Set min depth
+    global MIN_DEPTH
     if args['-d']:
         MIN_DEPTH = 7
     else:
@@ -631,7 +634,7 @@ def main():
     to_compare = []
     dfxml_ext = re.compile('\.df\.xml$')
 
-    diff = ColorDiff(dupl_file=args['-f'])
+    diff = ColorDiff(dupl_file=args['-f'], verbose_log=args['-v'])
     for i in imgs:
         i_pth = path.join(img_dir, i)
         # For info on what this does and what it means, see:
@@ -671,4 +674,4 @@ def main():
     diff.deinit()
 
 if __name__ == '__main__':
-    main()
+    main(docopt(__doc__))
