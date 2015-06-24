@@ -4,3 +4,6 @@
 [submodule "deps/pyuefi"]
 	path = deps/pyuefi
 	url = https://bitbucket.org/mmabey/pyuefi.git
+[submodule "deps/crx_unpack"]
+	path = deps/crx_unpack
+	url = https://bitbucket.org/mmabey/crx_unpack.git
