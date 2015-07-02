@@ -1,14 +1,16 @@
 
+from copy import deepcopy as copy
 from datetime import datetime, timezone
 import graph_tool.all as gt
 import logging
 from math import ceil, sqrt
 
 
-USED_FIELDS = ('_c_crtime', '_c_num_child_dirs', '_c_num_child_files', '_c_mode', '_c_depth', '_c_type')
+USED_FIELDS = ('_c_ctime', '_c_num_child_dirs', '_c_num_child_files', '_c_mode', '_c_depth', '_c_type')
 ISO_TIME = '%Y-%m-%dT%H:%M:%SZ'
 
-__all__ = ['calc_centroid', 'centroid_difference', 'InvalidCentroidError', 'InvalidTreeError']
+__all__ = ['calc_centroid', 'centroid_difference', 'InvalidCentroidError', 'InvalidTreeError', 'ISO_TIME',
+           'USED_FIELDS']
 
 
 class InvalidTreeError(Exception):
@@ -52,7 +54,8 @@ class CentroidCalc(object):
     The tree used to instantiate CentroidCalc must already have the following
     vertex properties with the identified types:
 
-    * *crtime* (str) Creation time with the format as given in ISO_TIME
+    * *ctime* (str) Most recent metadata (inode) change time with the format
+      as given in ISO_TIME
     * *mode* (str) The mode (permissions) for the vertex's file
     * *type* (vector<short>) The set of file types for the file
 
@@ -69,7 +72,7 @@ class CentroidCalc(object):
         self.digr = sub_tree
         self.digr.gp['centroid'] = self.digr.new_graph_property('vector<float>')
         self.digr.vp['_c_size'] = self.digr.new_vertex_property('int')
-        self.digr.vp['_c_crtime'] = self.digr.new_vertex_property('int')
+        self.digr.vp['_c_ctime'] = self.digr.new_vertex_property('int')
         self.digr.vp['_c_num_child_dirs'] = self.digr.new_vertex_property('int')
         self.digr.vp['_c_num_child_files'] = self.digr.new_vertex_property('int')
         self.digr.vp['_c_mode'] = self.digr.new_vertex_property('int')
@@ -78,7 +81,7 @@ class CentroidCalc(object):
 
         self.block_size = block_size
         self.top = self._get_tree_top()
-        logging.info('Created CentroidCalc object with %d vertices.' % self.digr.num_vertices())
+        logging.debug('Created CentroidCalc object with %d vertices.' % self.digr.num_vertices())
 
     def do_calc(self):
         """
@@ -123,20 +126,20 @@ class CentroidCalc(object):
         :type vertex: graph_tool.Vertex
         :param depth: Distance from the top-most vertex.
         :type depth: int
-        :param baseline_time: The creation time of the top-most vertex.
+        :param baseline_time: The inode changed time of the top-most vertex.
         :type baseline_time: int | None
         :return: None
         :rtype: None
         """
         # Convert this from str to int representing POSIX timestamp in UTC timezone
-        crtime = self.digr.vp['crtime'][vertex]
-        crtime = int(datetime.strptime(crtime, ISO_TIME).replace(tzinfo=timezone.utc).timestamp())
+        ctime = self.digr.vp['ctime'][vertex]
+        ctime = int(datetime.strptime(ctime, ISO_TIME).replace(tzinfo=timezone.utc).timestamp())
 
         if baseline_time is None:
-            baseline_time = crtime
+            baseline_time = ctime
 
         # Calculate relative time difference
-        self.digr.vp['_c_crtime'][vertex] = crtime - baseline_time
+        self.digr.vp['_c_ctime'][vertex] = ctime - baseline_time
 
         num_child_dirs = 0
         num_child_files = 0
@@ -158,7 +161,7 @@ class CentroidCalc(object):
         # Size
         size = int(self.digr.vp['size'][vertex])  # Get original size first
         size = int(ceil(size / self.block_size))  # How many blocks does it occupy?
-        self.digr.vp['_c_crtime'][vertex] = size
+        self.digr.vp['_c_size'][vertex] = size
 
         # Permissions
         try:
@@ -176,7 +179,7 @@ class CentroidCalc(object):
 
     def _get_tree_top(self):
         """
-        Traverse the self.digr subtree and returh the top-most vertex.
+        Traverse the self.digr subtree and return the top-most vertex.
 
         :return: The top-most vertex in the graph.
         :rtype: graph_tool.Vertex
@@ -212,6 +215,7 @@ class CentroidCalc(object):
     def graph(self):
         return self.digr.copy()
 
+
 def calc_centroid(sub_tree):
     """
     Convenience function for calculating the centroid for a tree.
@@ -225,7 +229,11 @@ def calc_centroid(sub_tree):
     assert isinstance(sub_tree, gt.Graph)
     calc = CentroidCalc(sub_tree)
     calc.do_calc()
-    return calc.centroid
+    cent = copy(calc.centroid)
+    # Try to conserve memory usage
+    del calc
+    return cent
+
 
 def centroid_difference(centroid1, centroid2):
     """
