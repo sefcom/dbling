@@ -1,11 +1,24 @@
 #!/usr/bin/env python3
 """
-Usage: crx.py
+Usage: crx.py [options]
+
+Options:
+ -b ID   Process extensions beginning at ID. Can be a single letter.
+ -p      Use periods to show progress in the thousands.
+ -q QMAX, --queue-max=QMAX
+         Set the maximum number of items in the queue. [Default: 25]
+ -s      Use a "stale" version of the database, i.e. don't download a new
+         version of the list of extensions.
+ -t CNT, --thread-count=CNT
+         Set number of worker threads. [Default: 5]
+ -u      Just update the list of IDs. Exact opposite of -s. No other
+         parameters will have effect when this is specified, except -p.
 
 """
 
 from centroid import *
 from datetime import date, datetime, timedelta
+from docopt import docopt
 import graph_tool.all as gt
 from hashlib import sha256
 import json
@@ -16,7 +29,7 @@ from os import path
 import queue
 import requests
 from sqlalchemy import create_engine, engine_from_config, MetaData, engine, Table, Column, String, Integer, Index, \
-    DateTime, select, and_, update
+    DateTime, select, and_, update, Float
 from sqlalchemy.exc import IntegrityError
 import stat
 import threading
@@ -292,13 +305,13 @@ def _init_db(db_conf):
                       Column('profiled', DateTime(True)),
 
                       # Centroid fields
-                      Column('size', Integer),
-                      Column('ctime', Integer),
-                      Column('num_dirs', Integer),
-                      Column('num_files', Integer),
-                      Column('perms', Integer),
-                      Column('depth', Integer),
-                      Column('type', Integer),
+                      Column('size', Float),
+                      Column('ctime', Float),
+                      Column('num_dirs', Float),
+                      Column('num_files', Float),
+                      Column('perms', Float),
+                      Column('depth', Float),
+                      Column('type', Float),
 
                       # Unique index on the extension ID and version
                       Index('idx_id_ver', 'ext_id', 'version', unique=True)
@@ -313,7 +326,7 @@ def _init_db(db_conf):
     return metadata
 
 
-def _update_crx_list(ext_url, db_meta):
+def _update_crx_list(ext_url, db_meta, show_progress=False):
     # Download the list of extensions
     logging.info('Downloading list of extensions.')
     resp = requests.get(ext_url)
@@ -349,16 +362,19 @@ def _update_crx_list(ext_url, db_meta):
                 pass
 
         count += 1
-        if not count % 1000:
+        if show_progress and not count % 1000:
             print('.', end='', flush=True)
-    print(count, flush=True)
+    if show_progress:
+        print(count, flush=True)
     db_conn.close()
+    logging.info('Update complete. Entries parsed: %d' % count)
+
     # Try to conserve memory usage
     del db_conn, xml_tree_root, id_list
 
 
 # @profile  # For memory profiling
-def update_database(local_sitemap=None, thread_count=5, queue_max=25):
+def update_database(download_fresh_list=True, thread_count=5, queue_max=25, show_progress=False, start_at=None):
     # Open and import the configuration file
     with open(path.join(DBLING_DIR, 'src', 'crx_conf.json')) as fin:
         conf = json.load(fin)
@@ -370,15 +386,12 @@ def update_database(local_sitemap=None, thread_count=5, queue_max=25):
 
     # This allows the calling function to specify a local filename to use instead of downloading a fresh sitemap
     # from Google, which takes a while to finish.
-    if local_sitemap is None:
+    if download_fresh_list:
         try:
-            _update_crx_list(conf['extension_list_url'], db_meta)
+            _update_crx_list(conf['extension_list_url'], db_meta, show_progress)
         except:
-            logging.critical('Something bad happened while updating the CRX list.')
+            logging.critical('Something bad happened while updating the CRX list.', exc_info=1)
             raise
-    else:
-        # Don't know what to do at this point since we're using the database now...
-        raise NotImplementedError
 
     # Get the paths to the working directories
     try:
@@ -418,17 +431,25 @@ def update_database(local_sitemap=None, thread_count=5, queue_max=25):
     id_table = Table('id_list', db_meta)
     db_conn = db_meta.bind.connect()
 
-    logging.info('Adding each CRX to the queue.')
+    if start_at is None:
+        logging.info('Adding each CRX to the queue.')
+    else:
+        assert isinstance(start_at, str)
+        assert start_at.isalpha()
+        start_at = start_at.lower()
+        logging.info('Adding IDs to the queue starting at "%s"' % start_at)
     count = 0
     try:
         # Put each CRX ID on the jobs queue
         with db_conn.begin():
             result = db_conn.execute(select([id_table]))
             for row in result:
+                if start_at is not None and row[0] < start_at:
+                    continue
                 crx_ids.put(row[0])
                 count += 1
                 del row
-                if not count % 1000:
+                if show_progress and not count % 1000:
                     print('.', end='', flush=True)
     except:
         db_conn.close()
@@ -440,7 +461,8 @@ def update_database(local_sitemap=None, thread_count=5, queue_max=25):
         logging.critical('Exception raised. All threads stopped successfully.')
         raise
 
-    print(count, flush=True)
+    if show_progress:
+        print(count, flush=True)
     db_conn.close()
     del result, db_conn, id_table
 
@@ -592,7 +614,7 @@ class DownloadWorker(_MyWorker):
         except:
             raise
         crx_version = get_crx_version(crx_path)
-        self.results.put((crx_id, crx_version, crx_path))
+        self.results.put((crx_id, crx_version, crx_path, datetime.today()))
         self.log_it('Download', crx_id)
 
 
@@ -604,7 +626,7 @@ class UnpackWorker(_MyWorker):
 
     # @profile  # For memory profiling
     def do_job(self, job):
-        crx_id, crx_version, crx_path = job
+        crx_id, crx_version, crx_path, dt_avail = job
         extracted_path = path.join(self.ex_path, crx_id, crx_version)
         try:
             unpack(crx_path, extracted_path, overwrite_if_exists=True)
@@ -623,14 +645,13 @@ class UnpackWorker(_MyWorker):
                 fout.write(crx_id + '\n')
             del fout
             return
-        except IndexError:
+        except (IndexError, IsADirectoryError):
             logging.warning('%s  Failed to unzip file likely because of a member filename error.' % crx_id, exc_info=1)
             with open(path.join(DBLING_DIR, 'src', 'failed_downloads.txt'), 'a') as fout:
                 fout.write(crx_id + '\n')
             del fout
             return
-        new_job = (crx_id, crx_version, extracted_path)
-        self.results.put(new_job)
+        self.results.put((crx_id, crx_version, extracted_path, dt_avail))
         self.log_it('Unpack', crx_id)
 
 
@@ -640,14 +661,15 @@ class CentroidWorker(_MyWorker):
                   '_c_num_child_files': 'num_files',
                   '_c_mode': 'perms',
                   '_c_depth': 'depth',
-                  '_c_type': 'type'}
+                  '_c_type': 'type',
+                  '_c_size': 'size'}
 
     def __init__(self, unpacked_dirs, dir_graphs):
         super().__init__(unpacked_dirs, dir_graphs)
 
     # @profile  # For memory profiling
     def do_job(self, job):
-        crx_id, crx_version, ext_path = job
+        crx_id, crx_version, ext_path, dt_avail = job
         # Generate graph from directory and centroid from the graph
         dir_graph = make_graph_from_dir(ext_path)
         cent_vals = calc_centroid(dir_graph)
@@ -655,8 +677,8 @@ class CentroidWorker(_MyWorker):
         del dir_graph
 
         # Match up the field names with their values for easier insertion to the DB later
-        cent_dict = {}
-        for k, v in zip(USED_FIELDS, cent_vals):
+        cent_dict = {'last_known_available': dt_avail}
+        for k, v in zip((USED_FIELDS + ('_c_size',)), cent_vals):
             cent_dict[self.used_to_db[k]] = v
         self.results.put((crx_id, crx_version, cent_dict))
         self.log_it('Centroid calculation', crx_id)
@@ -680,8 +702,6 @@ class DatabaseWorker(_MyWorker):
         # Open connection to the database
         self.db_conn = database_metadata.bind.connect()
 
-        self.now = datetime.today()
-
     def leave(self):
         # Close the connection to the database
         self.db_conn.close()
@@ -697,16 +717,25 @@ class DatabaseWorker(_MyWorker):
             with self.db_conn.begin():
                 update(self.extension.where(and_(self.extension.c.ext_id == crx_id,
                                                  self.extension.c.version == crx_version)),
-                       values={'last_known_available': self.now})
+                       values={'last_known_available': datetime.today()})
             return
 
         # Add entry to the database
+        cent_vals['ext_id'] = crx_id
+        cent_vals['version'] = crx_version
+        cent_vals['profiled'] = datetime.today()
         with self.db_conn.begin():
             self.db_conn.execute(self.extension.insert().values(cent_vals))
         self.log_it('Database entry', crx_id, logging.INFO)
 
+        # Try and conserve memory usage
+        del cent_vals, crx_id, crx_version, row
+
 
 if __name__ == '__main__':
+    # Get command-line parameters
+    args = docopt(__doc__)
+
     # Initialize logging
     _log_path = path.join(path.dirname(path.realpath(__file__)), '../log', "crx.log")
     try:
@@ -722,5 +751,24 @@ if __name__ == '__main__':
         DBLING_DIR = path.abspath(path.join(path.expandvars('$DBLING')))
     log_format = '%(asctime)s %(levelname) 8s -- %(message)s'
     logging.basicConfig(filename=_log_path, level=logging.INFO, format=log_format)
-    logging.info('CRX downloader initialized.')
-    update_database()
+
+    if args['-u']:
+        with open(path.join(DBLING_DIR, 'src', 'crx_conf.json')) as _fin:
+            _conf = json.load(_fin)
+        # Try to conserve memory usage
+        del _fin
+
+        # Connect to database
+        _db_meta = _init_db(_conf['db'])
+
+        # This allows the calling function to specify a local filename to use instead of downloading a fresh sitemap
+        # from Google, which takes a while to finish.
+        _update_crx_list(_conf['extension_list_url'], _db_meta, show_progress=args['-p'])
+        exit(0)
+
+    logging.info('Starting CRX downloader.')
+    update_database(download_fresh_list=(not args['-s']),
+                    thread_count=int(args['--thread-count']),
+                    queue_max=int(args['--queue-max']),
+                    show_progress=args['-p'],
+                    start_at=args['-b'])

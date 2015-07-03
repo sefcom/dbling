@@ -25,7 +25,8 @@ class InvalidCentroidError(Exception):
     """
     Indicates a centroid was improperly formed, having invalid values, the
     wrong number of dimensions, or some other issue. The number of dimensions
-    must match the number of values in the USED_FIELDS global tuple.
+    must match the number of values in the USED_FIELDS global tuple plus one,
+    the last of which represents the size.
     """
     pass
 
@@ -104,7 +105,7 @@ class CentroidCalc(object):
         for _e in self.digr.edges():
             p, q = _e.source(), _e.target()
             pw = self.digr.vp['_c_size'][p]
-            qw = self.digr.vp['_c_size'][p]
+            qw = self.digr.vp['_c_size'][q]
             sums['w'] += pw + qw
 
             for s, prop in zip(('t', 'u', 'v', 'x', 'y', 'z'), USED_FIELDS):
@@ -112,6 +113,8 @@ class CentroidCalc(object):
 
         for s in ('t', 'u', 'v', 'x', 'y', 'z')[:len(USED_FIELDS)]:
             self.digr.gp['centroid'].append(sums[s]/sums['w'])
+        # Add the size property
+        self.digr.gp['centroid'].append(sums['w'])
 
     def _set_properties(self, vertex, depth, baseline_time=None):
         """
@@ -223,7 +226,7 @@ def calc_centroid(sub_tree):
     :param sub_tree: The tree for which the centroid should be calculated.
     :type sub_tree: graph_tool.Graph
     :return: The centroid vector, as a tuple. Has the same number of
-             dimensions as the length of USED_FIELDS.
+             dimensions as the length of USED_FIELDS + 1.
     :rtype: tuple
     """
     assert isinstance(sub_tree, gt.Graph)
@@ -238,7 +241,7 @@ def calc_centroid(sub_tree):
 def centroid_difference(centroid1, centroid2):
     """
     Return the magnitude of the difference of the two centroid vectors, both
-    of which must have the same length as USED_FIELDS.
+    of which must have the same length as USED_FIELDS + 1.
 
     :param centroid1: A centroid.
     :type centroid1: tuple
@@ -247,9 +250,9 @@ def centroid_difference(centroid1, centroid2):
     :return: The magnitude of the vector difference.
     :rtype: float
     """
-    if len(centroid1) != len(centroid2) or len(centroid1) != len(USED_FIELDS):
+    if len(centroid1) != len(centroid2) or len(centroid1) != (len(USED_FIELDS) + 1):
         logging.critical('Cannot calculate centroid difference for vectors with invalid lengths.')
-        raise InvalidCentroidError('Both centroid vectors must have length %d' % len(USED_FIELDS))
+        raise InvalidCentroidError('Both centroid vectors must have length %d' % (len(USED_FIELDS) + 1))
 
     diff = []
     for i, j in zip(centroid1, centroid2):
