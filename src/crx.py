@@ -17,6 +17,7 @@ import queue
 import requests
 from sqlalchemy import create_engine, engine_from_config, MetaData, engine, Table, Column, String, Integer, Index, \
     DateTime, select, and_, update
+from sqlalchemy.exc import IntegrityError
 import stat
 import threading
 from unpack import unpack
@@ -303,7 +304,57 @@ def _init_db(db_conf):
                       Index('idx_id_ver', 'ext_id', 'version', unique=True)
                       )
     extension.create(checkfirst=True)
+
+    id_list = Table('id_list', metadata,
+                    Column('ext_id', String(32), primary_key=True)
+                    )
+    id_list.create(checkfirst=True)
+
     return metadata
+
+
+def _update_crx_list(ext_url, db_meta):
+    # Download the list of extensions
+    logging.info('Downloading list of extensions.')
+    resp = requests.get(ext_url)
+    resp.raise_for_status()  # If there was an HTTP error, raise it
+
+    # Get database handles
+    id_list = Table('id_list', db_meta)
+    db_conn = db_meta.bind.connect()
+
+    # Save the list
+    local_sitemap = path.join(DBLING_DIR, 'src', 'chrome_sitemap.xml')
+    with open(local_sitemap, 'wb') as fout:
+        fout.write(resp.content)
+    # Try to conserve memory usage
+    del resp, fout
+
+    count = 0
+
+    logging.info('Download finished. Adding IDs to the database.')
+    xml_tree_root = etree.parse(local_sitemap).getroot()  # Downloads for us from the URL
+    ns = '{http://www.sitemaps.org/schemas/sitemap/0.9}'
+    for url_elm in xml_tree_root.iterfind(ns + 'url'):
+        # Iterate over all url tags, get the string from the loc tag inside, strip off the extension ID
+        # using path.basename, and add it to the database.
+        crx_id = path.basename(url_elm.findtext(ns + 'loc'))[:32]
+        del url_elm
+
+        with db_conn.begin():
+            try:
+                db_conn.execute(id_list.insert().values(ext_id=crx_id))
+            except IntegrityError:
+                # Duplicate entry. No problem.
+                pass
+
+        count += 1
+        if not count % 1000:
+            print('.', end='', flush=True)
+    print(count, flush=True)
+    db_conn.close()
+    # Try to conserve memory usage
+    del db_conn, xml_tree_root, id_list
 
 
 # @profile  # For memory profiling
@@ -316,6 +367,18 @@ def update_database(local_sitemap=None, thread_count=5, queue_max=25):
 
     # Connect to database
     db_meta = _init_db(conf['db'])
+
+    # This allows the calling function to specify a local filename to use instead of downloading a fresh sitemap
+    # from Google, which takes a while to finish.
+    if local_sitemap is None:
+        try:
+            _update_crx_list(conf['extension_list_url'], db_meta)
+        except:
+            logging.critical('Something bad happened while updating the CRX list.')
+            raise
+    else:
+        # Don't know what to do at this point since we're using the database now...
+        raise NotImplementedError
 
     # Get the paths to the working directories
     try:
@@ -351,41 +414,24 @@ def update_database(local_sitemap=None, thread_count=5, queue_max=25):
     for t in all_threads:
         t.start()
 
-    # This allows the calling function to specify a local filename to use instead of downloading a fresh sitemap
-    # from Google, which takes a while to finish.
-    if local_sitemap is None:
-        # Download the list of extensions
-        logging.info('Downloading list of extensions.')
-        resp = requests.get(conf['extension_list_url'])
-        try:
-            resp.raise_for_status()  # If there was an HTTP error, raise it
-        except:
-            # Try to let every thread stop its work first so we don't exit in as much of an inconsistent state
-            for t in all_threads:
-                t.stop()
-            for t in all_threads:
-                t.join()
-            logging.critical('Exception raised. All threads stopped successfully.')
-            raise
+    # Get database handles
+    id_table = Table('id_list', db_meta)
+    db_conn = db_meta.bind.connect()
 
-        # Save the list
-        local_sitemap = path.join(DBLING_DIR, 'src', 'chrome_sitemap.xml')
-        with open(local_sitemap, 'wb') as fout:
-            fout.write(resp.content)
-        # Try to conserve memory usage
-        del resp, fout
-
+    logging.info('Adding each CRX to the queue.')
+    count = 0
     try:
         # Put each CRX ID on the jobs queue
-        logging.info('Adding each CRX to the queue.')
-        xml_tree_root = etree.parse(local_sitemap).getroot()  # Downloads for us from the URL
-        ns = '{http://www.sitemaps.org/schemas/sitemap/0.9}'
-        for url_elm in xml_tree_root.iterfind(ns + 'url'):
-            # Iterate over all url tags, get the string from the loc tag inside, strip off the extension ID
-            # using path.basename, and put it on the first queue.
-            crx_ids.put(path.basename(url_elm.findtext(ns + 'loc')))
-            del url_elm
+        with db_conn.begin():
+            result = db_conn.execute(select([id_table]))
+            for row in result:
+                crx_ids.put(row[0])
+                count += 1
+                del row
+                if not count % 1000:
+                    print('.', end='', flush=True)
     except:
+        db_conn.close()
         # Try to let every thread stop its work first so we don't exit in as much of an inconsistent state
         for t in all_threads:
             t.stop()
@@ -394,8 +440,9 @@ def update_database(local_sitemap=None, thread_count=5, queue_max=25):
         logging.critical('Exception raised. All threads stopped successfully.')
         raise
 
-    # Try to release some memory...
-    del xml_tree_root
+    print(count, flush=True)
+    db_conn.close()
+    del result, db_conn, id_table
 
     # Wait until the jobs are done and the results have been processed
     logging.info('All jobs are now on the queue.')
@@ -565,13 +612,19 @@ class UnpackWorker(_MyWorker):
             # No need to get the path from the error since we already know the extracted path
             pass
         except BadZipFile:
-            logging.warning('%s  Failed to unzip file because it isn\'t valid.')
+            logging.warning('%s  Failed to unzip file because it isn\'t valid.' % crx_id)
             with open(path.join(DBLING_DIR, 'src', 'failed_downloads.txt'), 'a') as fout:
                 fout.write(crx_id + '\n')
             del fout
             return
         except MemoryError:
-            logging.warning('%s  Failed to unzip file because of a memory error.')
+            logging.warning('%s  Failed to unzip file because of a memory error.' % crx_id)
+            with open(path.join(DBLING_DIR, 'src', 'failed_downloads.txt'), 'a') as fout:
+                fout.write(crx_id + '\n')
+            del fout
+            return
+        except IndexError:
+            logging.warning('%s  Failed to unzip file likely because of a member filename error.' % crx_id, exc_info=1)
             with open(path.join(DBLING_DIR, 'src', 'failed_downloads.txt'), 'a') as fout:
                 fout.write(crx_id + '\n')
             del fout
@@ -622,12 +675,10 @@ class DatabaseWorker(_MyWorker):
         :return:
         """
         super().__init__(centroids, None)
-        self.db_meta = database_metadata
-        self.db_engine = self.db_meta.bind
-        self.extension = self.db_meta.sorted_tables[0]
+        self.extension = Table('extension', database_metadata)
 
         # Open connection to the database
-        self.db_conn = self.db_engine.connect()
+        self.db_conn = database_metadata.bind.connect()
 
         self.now = datetime.today()
 
