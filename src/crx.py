@@ -48,6 +48,13 @@ FILE_TYPES = {stat.S_IFREG: 1,
               stat.S_IFIFO: 5,
               stat.S_IFSOCK: 6,
               stat.S_IFLNK: 7}
+USED_TO_DB = {'_c_ctime': 'ctime',
+              '_c_num_child_dirs': 'num_dirs',
+              '_c_num_child_files': 'num_files',
+              '_c_mode': 'perms',
+              '_c_depth': 'depth',
+              '_c_type': 'type',
+              '_c_size': 'size'}
 DB_ENGINE = None
 DBLING_DIR = None
 
@@ -656,13 +663,6 @@ class UnpackWorker(_MyWorker):
 
 
 class CentroidWorker(_MyWorker):
-    used_to_db = {'_c_ctime': 'ctime',
-                  '_c_num_child_dirs': 'num_dirs',
-                  '_c_num_child_files': 'num_files',
-                  '_c_mode': 'perms',
-                  '_c_depth': 'depth',
-                  '_c_type': 'type',
-                  '_c_size': 'size'}
 
     def __init__(self, unpacked_dirs, dir_graphs):
         super().__init__(unpacked_dirs, dir_graphs)
@@ -677,10 +677,10 @@ class CentroidWorker(_MyWorker):
         del dir_graph
 
         # Match up the field names with their values for easier insertion to the DB later
-        cent_dict = {'last_known_available': dt_avail}
+        cent_dict = {}
         for k, v in zip((USED_FIELDS + ('_c_size',)), cent_vals):
-            cent_dict[self.used_to_db[k]] = v
-        self.results.put((crx_id, crx_version, cent_dict))
+            cent_dict[USED_TO_DB[k]] = v
+        self.results.put((crx_id, crx_version, cent_dict, dt_avail))
         self.log_it('Centroid calculation', crx_id)
 
 
@@ -708,22 +708,23 @@ class DatabaseWorker(_MyWorker):
 
     # @profile  # For memory profiling
     def do_job(self, job):
-        crx_id, crx_version, cent_vals = job
+        crx_id, crx_version, cent_vals, dt_avail = job
         # If we already have this version in the database, update the last known available datetime
         s = select([self.extension]).where(and_(self.extension.c.ext_id == crx_id,
                                                 self.extension.c.version == crx_version))
         row = self.db_conn.execute(s).fetchone()
         if row:
             with self.db_conn.begin():
-                update(self.extension.where(and_(self.extension.c.ext_id == crx_id,
-                                                 self.extension.c.version == crx_version)),
-                       values={'last_known_available': datetime.today()})
+                update(self.extension).where(and_(self.extension.c.ext_id == crx_id,
+                                                  self.extension.c.version == crx_version)).\
+                    values(last_known_available=dt_avail)
             return
 
         # Add entry to the database
         cent_vals['ext_id'] = crx_id
         cent_vals['version'] = crx_version
         cent_vals['profiled'] = datetime.today()
+        cent_vals['last_known_available'] = dt_avail
         with self.db_conn.begin():
             self.db_conn.execute(self.extension.insert().values(cent_vals))
         self.log_it('Database entry', crx_id, logging.INFO)

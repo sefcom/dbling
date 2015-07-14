@@ -238,25 +238,38 @@ def calc_centroid(sub_tree):
     return cent
 
 
-def centroid_difference(centroid1, centroid2):
+def centroid_difference(centroid1, centroid2, normalize=None):
     """
     Return the magnitude of the difference of the two centroid vectors, both
     of which must have the same length as USED_FIELDS + 1.
+
+    To normalize the values in the centroids before calculating their
+    difference, pass a tuple as normalize with the same length.
 
     :param centroid1: A centroid.
     :type centroid1: tuple
     :param centroid2: A centroid.
     :type centroid2: tuple
+    :param normalize: Set of normalizing values.
+    :type normalize: tuple|list
     :return: The magnitude of the vector difference.
     :rtype: float
     """
     if len(centroid1) != len(centroid2) or len(centroid1) != (len(USED_FIELDS) + 1):
         logging.critical('Cannot calculate centroid difference for vectors with invalid lengths.')
         raise InvalidCentroidError('Both centroid vectors must have length %d' % (len(USED_FIELDS) + 1))
+    if normalize is not None and len(normalize) != (len(USED_FIELDS) + 1):
+        logging.critical('Cannot calculate centroid difference using a normalizing vectors with an invalid length.')
+        raise InvalidCentroidError('Normalizing centroid vector must have length %d' % (len(USED_FIELDS) + 1))
 
     diff = []
-    for i, j in zip(centroid1, centroid2):
-        diff.append(i-j)
+
+    # Non-normalized difference
+    if normalize is None:
+        normalize = [1] * (len(USED_FIELDS) + 1)
+
+    for i, j, n in zip(centroid1, centroid2, normalize):
+        diff.append((i / n) - (j / n))
 
     magnitude = 0
     for k in diff:
