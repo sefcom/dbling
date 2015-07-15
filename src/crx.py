@@ -14,6 +14,15 @@ Options:
  -u      Just update the list of IDs. Exact opposite of -s. No other
          parameters will have effect when this is specified, except -p.
 
+The update process is very memory-intensive. For this reason, it is typically
+best to run the tool with the -u option first, then run it again with -s. It's
+also best to expect the program to fail, most often due to a memory error, i.e.
+running out of memory. For this reason, recovery safeguards are in place to
+resume a previously failed update approximately where things left off.
+
+Such memory errors cause the operating system to kill the entire process. As
+such, no de-constructors or other specified methods can be called to
+gracefully handle shutdown.
 """
 
 from centroid import *
@@ -32,6 +41,7 @@ from sqlalchemy import create_engine, engine_from_config, MetaData, engine, Tabl
     DateTime, select, and_, update, Float
 from sqlalchemy.exc import IntegrityError
 import stat
+from string import ascii_lowercase
 import threading
 from unpack import unpack
 from zipfile import BadZipFile
@@ -391,6 +401,14 @@ def update_database(download_fresh_list=True, thread_count=5, queue_max=25, show
     # Connect to database
     db_meta = _init_db(conf['db'])
 
+    # Check to see if we need to recover from a previously failed run
+    backup_file = path.join(DBLING_DIR, 'src', 'recovery.bak')
+    if path.exists(backup_file):
+        logging.info('Recovering previous session using the backup file.')
+        download_fresh_list = False
+        with open(backup_file) as fin:
+            start_at = fin.read(2)  # Only need the first 2 characters
+
     # This allows the calling function to specify a local filename to use instead of downloading a fresh sitemap
     # from Google, which takes a while to finish.
     if download_fresh_list:
@@ -427,7 +445,7 @@ def update_database(download_fresh_list=True, thread_count=5, queue_max=25, show
         c_threads.append(CentroidWorker(directories, centroids))
 
     # Create database worker thread
-    db_thread = DatabaseWorker(centroids, db_meta)
+    db_thread = DatabaseWorker(centroids, db_meta, backup_file)
     all_threads = d_threads + u_threads + c_threads + [db_thread]
 
     # Start all the downloader and unpacker threads
@@ -492,6 +510,10 @@ def update_database(download_fresh_list=True, thread_count=5, queue_max=25, show
 
     for t in all_threads:
         t.join()
+
+    # Delete the backup file to indicate the run completed successfully
+    os.remove(backup_file)
+
     logging.info('All threads have stopped successfully.')
 
 
@@ -686,7 +708,7 @@ class CentroidWorker(_MyWorker):
 
 class DatabaseWorker(_MyWorker):
 
-    def __init__(self, centroids, database_metadata):
+    def __init__(self, centroids, database_metadata, backup_file):
         """
 
         :param centroids: The queue of computed centroids.
@@ -702,9 +724,39 @@ class DatabaseWorker(_MyWorker):
         # Open connection to the database
         self.db_conn = database_metadata.bind.connect()
 
+        # Store count of jobs completed so we know when to back up our progress
+        self.count = 0
+        self.backup_file = backup_file
+
     def leave(self):
         # Close the connection to the database
         self.db_conn.close()
+
+    def _backup_progress(self, crx_id):
+        """
+        Using the given ID, store a 2-character starting point in the backup
+        file. For example, if crx_id starts with "ca...", the stored string
+        will be "bz" to ensure no gap between what is done and where the
+        program picks up again later.
+
+        :param crx_id: The ID of an extension that has been successfully added
+                       added to the database.
+        :type crx_id: str
+        :return: None
+        :rtype: None
+        """
+        if crx_id[1] == 'a':
+            if crx_id[0] == 'a':
+                bak = 'aa'
+            else:
+                bak = ascii_lowercase[ascii_lowercase.index(crx_id[0])-1] + 'z'
+        else:
+            bak = crx_id[0] + ascii_lowercase[ascii_lowercase.index(crx_id[1])-1]
+
+        with open(self.backup_file, 'w') as fout:
+            fout.write(bak)
+
+        del crx_id, bak, fout
 
     # @profile  # For memory profiling
     def do_job(self, job):
@@ -718,16 +770,24 @@ class DatabaseWorker(_MyWorker):
                 update(self.extension).where(and_(self.extension.c.ext_id == crx_id,
                                                   self.extension.c.version == crx_version)).\
                     values(last_known_available=dt_avail)
-            return
+        else:
+            # Add entry to the database
+            cent_vals['ext_id'] = crx_id
+            cent_vals['version'] = crx_version
+            cent_vals['profiled'] = datetime.today()
+            cent_vals['last_known_available'] = dt_avail
+            with self.db_conn.begin():
+                self.db_conn.execute(self.extension.insert().values(cent_vals))
 
-        # Add entry to the database
-        cent_vals['ext_id'] = crx_id
-        cent_vals['version'] = crx_version
-        cent_vals['profiled'] = datetime.today()
-        cent_vals['last_known_available'] = dt_avail
-        with self.db_conn.begin():
-            self.db_conn.execute(self.extension.insert().values(cent_vals))
-        self.log_it('Database entry', crx_id, logging.INFO)
+        self.count += 1
+        if not self.count % 1000:
+            self._backup_progress(crx_id)
+
+        # Only log every 100 successful entries at a higher logging level
+        if not self.count % 100:
+            self.log_it('Database entry', crx_id, logging.INFO)
+        else:
+            self.log_it('Database entry', crx_id, logging.DEBUG)
 
         # Try and conserve memory usage
         del cent_vals, crx_id, crx_version, row
