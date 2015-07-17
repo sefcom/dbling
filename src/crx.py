@@ -71,6 +71,10 @@ DB_ENGINE = None
 DBLING_DIR = None
 
 
+class BadDownloadURL(Exception):
+    pass
+
+
 def download(crx_id, save_path=None):
     """
     Given an extension ID, download the .crx file. If save_path is given, save
@@ -96,6 +100,10 @@ def download(crx_id, save_path=None):
     url = DOWNLOAD_URL.format(CHROME_VERSION, crx_id)
     resp = requests.get(url)
     resp.raise_for_status()  # If there was an HTTP error, raise it
+
+    # If the URL we got back was the same one we requested, the download failed
+    if url == resp.url:
+        raise BadDownloadURL
 
     # Save the CRX file
     filename = crx_id + resp.url.rsplit('extension', 1)[-1]  # ID + version
@@ -634,6 +642,12 @@ class DownloadWorker(_MyWorker):
                 fout.write(crx_id + '\n')
             del fout
             return
+        except BadDownloadURL:
+            # Most likely reasons why this error is raised: 1) the extension is part of an invite-only beta or other
+            # restricted distribution, or 2) the extension is listed as being compatible with Chrome OS only.
+            # Until we develop a workaround, just skip it.
+            logging.warning('%s  Bad download URL' % crx_id)
+            return
         except requests.HTTPError as err:
             # Something bad happened trying to download the actual file. No way to know how to resolve it, so
             # just skip it and move on.
@@ -718,6 +732,8 @@ class DatabaseWorker(_MyWorker):
         :param database_metadata: A metadata object bound to an instantiated
                                   engine.
         :type database_metadata: MetaData
+        :param backup_file: The file to use for backing up progress.
+        :type backup_file: str
         :return:
         """
         super().__init__(centroids, None)
