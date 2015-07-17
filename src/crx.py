@@ -65,6 +65,8 @@ USED_TO_DB = {'_c_ctime': 'ctime',
               '_c_depth': 'depth',
               '_c_type': 'type',
               '_c_size': 'size'}
+CHROME_VERSION = None
+DOWNLOAD_URL = None
 DB_ENGINE = None
 DBLING_DIR = None
 
@@ -87,28 +89,18 @@ def download(crx_id, save_path=None):
     # Validate the CRX ID
     assert isinstance(crx_id, str)
     assert crx_id.isalnum()
-    # TODO: If we can be sure the length won't change, we can also check that len(crx_id) == 32
-
-    # Open and load the configuration file
-    with open(path.join(DBLING_DIR, 'src', 'crx_conf.json')) as fin:
-        conf = json.load(fin)
-
-    # Calculate the version of Chrome we should specify in the URL
-    version = calc_chrome_version(conf['version'], conf['release_date'])
+    assert len(crx_id) == 32
 
     # Make the download request
     # For details about the URL, see http://chrome-extension-downloader.com/how-does-it-work.php
-    url = conf['url'].format(version, crx_id)
+    url = DOWNLOAD_URL.format(CHROME_VERSION, crx_id)
     resp = requests.get(url)
     resp.raise_for_status()  # If there was an HTTP error, raise it
 
     # Save the CRX file
     filename = crx_id + resp.url.rsplit('extension', 1)[-1]  # ID + version
     if save_path is None:
-        try:
-            save_path = conf['save_path']
-        except KeyError:
-            save_path = '.'
+        save_path = path.join('.', 'downloads')
     full_save_path = path.abspath(path.join(save_path, filename))
 
     if path.exists(full_save_path):
@@ -123,7 +115,7 @@ def download(crx_id, save_path=None):
         fout.write(resp.content)
 
     # Try to conserve memory usage
-    del fin, fout, resp
+    del fout, resp
 
     # Return the full path where the CRX was saved
     return full_save_path
@@ -477,12 +469,12 @@ def update_database(download_fresh_list=True, thread_count=5, queue_max=25, show
                 if show_progress and not count % 1000:
                     print('.', end='', flush=True)
     except:
-        db_conn.close()
         # Try to let every thread stop its work first so we don't exit in as much of an inconsistent state
         for t in all_threads:
             t.stop()
         for t in all_threads:
             t.join()
+        db_conn.close()
         logging.critical('Exception raised. All threads stopped successfully.')
         raise
 
@@ -617,6 +609,16 @@ class DownloadWorker(_MyWorker):
         :return: None
         :rtype: None
         """
+        # Check that the ID is for a valid extension
+        r = requests.get('https://chrome.google.com/webstore/detail/%s' % crx_id, allow_redirects=False)
+        try:
+            assert r.status_code == 301  # If we don't get a 301, the extension is invalid
+        except AssertionError:
+            # This could mean a few things. Either it was never a valid extension ID, it was taken down by Google,
+            # or the author removed it.
+            # TODO: Update the database. Mark this extension as invalid.
+            return
+
         # Download the CRX file, put the full save path on the results queue
         try:
             crx_path = download(crx_id, self.save_path)
@@ -627,7 +629,7 @@ class DownloadWorker(_MyWorker):
         except FileNotFoundError:
             # Probably couldn't properly save the file because of some weird characters in the path we tried
             # to save it at. Keep the ID of the CRX so we can try again later.
-            logging.warning('%s  Failed to save CRX' % crx_id)
+            logging.warning('%s  Failed to save CRX' % crx_id, exc_info=1)
             with open(path.join(DBLING_DIR, 'src', 'failed_downloads.txt'), 'a') as fout:
                 fout.write(crx_id + '\n')
             del fout
@@ -813,12 +815,17 @@ if __name__ == '__main__':
     log_format = '%(asctime)s %(levelname) 8s -- %(message)s'
     logging.basicConfig(filename=_log_path, level=logging.INFO, format=log_format)
 
-    if args['-u']:
-        with open(path.join(DBLING_DIR, 'src', 'crx_conf.json')) as _fin:
-            _conf = json.load(_fin)
-        # Try to conserve memory usage
-        del _fin
+    # Get the configuration
+    with open(path.join(DBLING_DIR, 'src', 'crx_conf.json')) as _fin:
+        _conf = json.load(_fin)
+    # Try to conserve memory usage
+    del _fin
 
+    # Set the global variables for the version of Chrome and download URL
+    CHROME_VERSION = calc_chrome_version(_conf['version'], _conf['release_date'])
+    DOWNLOAD_URL = _conf['url']
+
+    if args['-u']:
         # Connect to database
         _db_meta = _init_db(_conf['db'])
 
