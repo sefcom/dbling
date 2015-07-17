@@ -98,7 +98,7 @@ def download(crx_id, save_path=None):
     # Make the download request
     # For details about the URL, see http://chrome-extension-downloader.com/how-does-it-work.php
     url = DOWNLOAD_URL.format(CHROME_VERSION, crx_id)
-    resp = requests.get(url)
+    resp = requests.get(url, stream=True)
     resp.raise_for_status()  # If there was an HTTP error, raise it
 
     # If the URL we got back was the same one we requested, the download failed
@@ -119,8 +119,9 @@ def download(crx_id, save_path=None):
         raise err
 
     with open(full_save_path, 'wb') as fout:
-        # Write the whole binary response to the file
-        fout.write(resp.content)
+        # Write the binary response to the file 512 bytes at a time
+        for chunk in resp.iter_content(chunk_size=512):
+            fout.write(chunk)
 
     # Try to conserve memory usage
     del fout, resp
