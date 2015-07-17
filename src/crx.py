@@ -434,19 +434,21 @@ def update_database(download_fresh_list=True, thread_count=5, queue_max=25, show
     zip_files = queue.Queue(queue_max)
     directories = queue.Queue(queue_max)
     centroids = queue.Queue(queue_max)
+    stats = queue.Queue(queue_max)
 
     # Create the worker threads
     d_threads = []
     u_threads = []
     c_threads = []
     for i in range(thread_count):
-        d_threads.append(DownloadWorker(crx_ids, zip_files, save_path))
-        u_threads.append(UnpackWorker(zip_files, directories, extract_dir))
-        c_threads.append(CentroidWorker(directories, centroids))
+        d_threads.append(DownloadWorker(crx_ids, zip_files, save_path, stats))
+        u_threads.append(UnpackWorker(zip_files, directories, extract_dir, stats))
+        c_threads.append(CentroidWorker(directories, centroids, stats))
 
-    # Create database worker thread
-    db_thread = DatabaseWorker(centroids, db_meta, backup_file)
-    all_threads = d_threads + u_threads + c_threads + [db_thread]
+    # Create database worker and error processor threads
+    db_thread = DatabaseWorker(centroids, db_meta, backup_file, stats)
+    stat_thread = StatsProcessor(stats, start_at)
+    all_threads = d_threads + u_threads + c_threads + [db_thread, stat_thread]
 
     # Start all the downloader and unpacker threads
     for t in all_threads:
@@ -507,6 +509,10 @@ def update_database(download_fresh_list=True, thread_count=5, queue_max=25, show
 
     centroids.join()
     db_thread.stop()  # Database worker
+
+    stats.put('exited_cleanly')
+    stats.join()
+    stat_thread.stop()
 
     for t in all_threads:
         t.join()
@@ -603,9 +609,10 @@ class DownloadWorker(_MyWorker):
     Download CRX files and save them for unpacking.
     """
 
-    def __init__(self, jobs, results, save_path):
+    def __init__(self, jobs, results, save_path, stats_queue):
         super().__init__(jobs, results)
         self.save_path = save_path
+        self.stats = stats_queue
 
     # @profile  # For memory profiling
     def do_job(self, crx_id):
@@ -625,6 +632,7 @@ class DownloadWorker(_MyWorker):
             # This could mean a few things. Either it was never a valid extension ID, it was taken down by Google,
             # or the author removed it.
             # TODO: Update the database. Mark this extension as invalid.
+            self.stats.put('bad_download_no_301')
             return
 
         # Download the CRX file, put the full save path on the results queue
@@ -634,6 +642,7 @@ class DownloadWorker(_MyWorker):
             # This should only happen if the versions match. Unfortunately, we can't assume the other version
             # completed successfully, so we need to extract the crx_path from the error message.
             crx_path = err.filename
+            self.stats.put('good_overwritten_download')
         except FileNotFoundError:
             # Probably couldn't properly save the file because of some weird characters in the path we tried
             # to save it at. Keep the ID of the CRX so we can try again later.
@@ -641,12 +650,14 @@ class DownloadWorker(_MyWorker):
             with open(path.join(DBLING_DIR, 'src', 'failed_downloads.txt'), 'a') as fout:
                 fout.write(crx_id + '\n')
             del fout
+            self.stats.put('file_not_found')
             return
         except BadDownloadURL:
             # Most likely reasons why this error is raised: 1) the extension is part of an invite-only beta or other
             # restricted distribution, or 2) the extension is listed as being compatible with Chrome OS only.
             # Until we develop a workaround, just skip it.
             logging.warning('%s  Bad download URL' % crx_id)
+            self.stats.put('bad_download_no_access')
             return
         except requests.HTTPError as err:
             # Something bad happened trying to download the actual file. No way to know how to resolve it, so
@@ -655,9 +666,12 @@ class DownloadWorker(_MyWorker):
             with open(path.join(DBLING_DIR, 'src', 'failed_downloads.txt'), 'a') as fout:
                 fout.write(crx_id + '\n')
             del fout
+            self.stats.put('http_error')
             return
         except:
             raise
+        else:
+            self.stats.put('good_fresh_download')
         crx_version = get_crx_version(crx_path)
         self.results.put((crx_id, crx_version, crx_path, datetime.today()))
         self.log_it('Download', crx_id)
@@ -665,9 +679,10 @@ class DownloadWorker(_MyWorker):
 
 class UnpackWorker(_MyWorker):
 
-    def __init__(self, downloads, unpacked_dirs, extract_path):
+    def __init__(self, downloads, unpacked_dirs, extract_path, stats_queue):
         super().__init__(downloads, unpacked_dirs)
         self.ex_path = extract_path
+        self.stats = stats_queue
 
     # @profile  # For memory profiling
     def do_job(self, job):
@@ -677,33 +692,39 @@ class UnpackWorker(_MyWorker):
             unpack(crx_path, extracted_path, overwrite_if_exists=True)
         except FileExistsError:
             # No need to get the path from the error since we already know the extracted path
-            pass
+            self.stats.put('failed_zip_overwrite_attempt')
         except BadZipFile:
             logging.warning('%s  Failed to unzip file because it isn\'t valid.' % crx_id)
             with open(path.join(DBLING_DIR, 'src', 'failed_downloads.txt'), 'a') as fout:
                 fout.write(crx_id + '\n')
             del fout
+            self.stats.put('invalid_zip')
             return
         except MemoryError:
             logging.warning('%s  Failed to unzip file because of a memory error.' % crx_id)
             with open(path.join(DBLING_DIR, 'src', 'failed_downloads.txt'), 'a') as fout:
                 fout.write(crx_id + '\n')
             del fout
+            self.stats.put('unzip_memory_error')
             return
         except (IndexError, IsADirectoryError):
             logging.warning('%s  Failed to unzip file likely because of a member filename error.' % crx_id, exc_info=1)
             with open(path.join(DBLING_DIR, 'src', 'failed_downloads.txt'), 'a') as fout:
                 fout.write(crx_id + '\n')
             del fout
+            self.stats.put('other_unzip_error')
             return
+        else:
+            self.stats.put('newly_unpacked_zip')
         self.results.put((crx_id, crx_version, extracted_path, dt_avail))
         self.log_it('Unpack', crx_id)
 
 
 class CentroidWorker(_MyWorker):
 
-    def __init__(self, unpacked_dirs, dir_graphs):
+    def __init__(self, unpacked_dirs, dir_graphs, stats_queue):
         super().__init__(unpacked_dirs, dir_graphs)
+        self.stats = stats_queue
 
     # @profile  # For memory profiling
     def do_job(self, job):
@@ -719,12 +740,13 @@ class CentroidWorker(_MyWorker):
         for k, v in zip((USED_FIELDS + ('_c_size',)), cent_vals):
             cent_dict[USED_TO_DB[k]] = v
         self.results.put((crx_id, crx_version, cent_dict, dt_avail))
+        self.stats.put('centroids_calculated')
         self.log_it('Centroid calculation', crx_id)
 
 
 class DatabaseWorker(_MyWorker):
 
-    def __init__(self, centroids, database_metadata, backup_file):
+    def __init__(self, centroids, database_metadata, backup_file, stats_queue):
         """
 
         :param centroids: The queue of computed centroids.
@@ -734,10 +756,13 @@ class DatabaseWorker(_MyWorker):
         :type database_metadata: MetaData
         :param backup_file: The file to use for backing up progress.
         :type backup_file: str
+        :param stats_queue: Queue for keeping track of run statistics.
+        :type stats_queue: queue.Queue
         :return:
         """
         super().__init__(centroids, None)
         self.extension = Table('extension', database_metadata)
+        self.stats = stats_queue
 
         # Open connection to the database
         self.db_conn = database_metadata.bind.connect()
@@ -788,6 +813,7 @@ class DatabaseWorker(_MyWorker):
                 update(self.extension).where(and_(self.extension.c.ext_id == crx_id,
                                                   self.extension.c.version == crx_version)).\
                     values(last_known_available=dt_avail)
+            self.stats.put('updated_existing_row')
         else:
             # Add entry to the database
             cent_vals['ext_id'] = crx_id
@@ -796,6 +822,7 @@ class DatabaseWorker(_MyWorker):
             cent_vals['last_known_available'] = dt_avail
             with self.db_conn.begin():
                 self.db_conn.execute(self.extension.insert().values(cent_vals))
+            self.stats.put('successfully_added_new_row')
 
         self.count += 1
         if not self.count % 1000:
@@ -809,6 +836,41 @@ class DatabaseWorker(_MyWorker):
 
         # Try and conserve memory usage
         del cent_vals, crx_id, crx_version, row
+
+
+class StatsProcessor(_MyWorker):
+
+    def __init__(self, stats_queue, recovery=False):
+        super().__init__(stats_queue, None)
+        self._total = 0
+        if recovery:
+            try:
+                with open('stats.json') as fin:
+                    self.stats = json.load(fin)
+            except FileNotFoundError:
+                self.stats = {}
+            self.do_job('times_recovered')
+        else:
+            self.stats = {}
+
+    def do_job(self, stat_type):
+        if stat_type not in self.stats:
+            self.stats[stat_type] = 1
+        else:
+            self.stats[stat_type] += 1
+        self._total += 1
+        if not self._total % 100:
+            # Every 100 entries, make a backup copy of the file
+            self._log_stat()
+        del stat_type
+
+    def _log_stat(self):
+        with open('stats.json', 'w') as fout:
+            json.dump(self.stats, fout, indent=2)
+        del fout
+
+    def leave(self):
+        self._log_stat()
 
 
 if __name__ == '__main__':
