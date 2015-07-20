@@ -511,7 +511,7 @@ def update_database(download_fresh_list=True, thread_count=5, queue_max=25, show
     centroids.join()
     db_thread.stop()  # Database worker
 
-    stats.put('exited_cleanly')
+    stats.put('+Exited cleanly')
     stats.join()
     stat_thread.stop()
 
@@ -633,7 +633,7 @@ class DownloadWorker(_MyWorker):
             # This could mean a few things. Either it was never a valid extension ID, it was taken down by Google,
             # or the author removed it.
             # TODO: Update the database. Mark this extension as invalid.
-            self.stats.put('bad_download_no_301')
+            self.stats.put('-Invalid extension ID: No 301 status when expected')
             return
 
         # Download the CRX file, put the full save path on the results queue
@@ -643,7 +643,7 @@ class DownloadWorker(_MyWorker):
             # This should only happen if the versions match. Unfortunately, we can't assume the other version
             # completed successfully, so we need to extract the crx_path from the error message.
             crx_path = err.filename
-            self.stats.put('good_overwritten_download')
+            self.stats.put('+CRX download completed, but overwrote previously downloaded file')
         except FileNotFoundError:
             # Probably couldn't properly save the file because of some weird characters in the path we tried
             # to save it at. Keep the ID of the CRX so we can try again later.
@@ -651,14 +651,14 @@ class DownloadWorker(_MyWorker):
             with open(path.join(DBLING_DIR, 'src', 'failed_downloads.txt'), 'a') as fout:
                 fout.write(crx_id + '\n')
             del fout
-            self.stats.put('file_not_found')
+            self.stats.put('-Got FileNotFound error when trying to save the download')
             return
         except BadDownloadURL:
             # Most likely reasons why this error is raised: 1) the extension is part of an invite-only beta or other
             # restricted distribution, or 2) the extension is listed as being compatible with Chrome OS only.
             # Until we develop a workaround, just skip it.
             logging.warning('%s  Bad download URL' % crx_id)
-            self.stats.put('bad_download_no_access')
+            self.stats.put('-Denied access to download')
             return
         except requests.HTTPError as err:
             # Something bad happened trying to download the actual file. No way to know how to resolve it, so
@@ -667,12 +667,12 @@ class DownloadWorker(_MyWorker):
             with open(path.join(DBLING_DIR, 'src', 'failed_downloads.txt'), 'a') as fout:
                 fout.write(crx_id + '\n')
             del fout
-            self.stats.put('http_error')
+            self.stats.put('-Got HTTPError error when downloading')
             return
         except:
             raise
         else:
-            self.stats.put('good_fresh_download')
+            self.stats.put('+CRX download complete, fresh file saved')
         crx_version = get_crx_version(crx_path)
         self.results.put((crx_id, crx_version, crx_path, datetime.today()))
         self.log_it('Download', crx_id)
@@ -693,30 +693,30 @@ class UnpackWorker(_MyWorker):
             unpack(crx_path, extracted_path, overwrite_if_exists=True)
         except FileExistsError:
             # No need to get the path from the error since we already know the extracted path
-            self.stats.put('failed_zip_overwrite_attempt')
+            self.stats.put('|Failed to overwrite an existing Zip file, but didn\'t crash')
         except BadZipFile:
             logging.warning('%s  Failed to unzip file because it isn\'t valid.' % crx_id)
             with open(path.join(DBLING_DIR, 'src', 'failed_downloads.txt'), 'a') as fout:
                 fout.write(crx_id + '\n')
             del fout
-            self.stats.put('invalid_zip')
+            self.stats.put('-Zip file failed validation')
             return
         except MemoryError:
             logging.warning('%s  Failed to unzip file because of a memory error.' % crx_id)
             with open(path.join(DBLING_DIR, 'src', 'failed_downloads.txt'), 'a') as fout:
                 fout.write(crx_id + '\n')
             del fout
-            self.stats.put('unzip_memory_error')
+            self.stats.put('-Unpacking Zip file failed due do a MemoryError')
             return
         except (IndexError, IsADirectoryError):
             logging.warning('%s  Failed to unzip file likely because of a member filename error.' % crx_id, exc_info=1)
             with open(path.join(DBLING_DIR, 'src', 'failed_downloads.txt'), 'a') as fout:
                 fout.write(crx_id + '\n')
             del fout
-            self.stats.put('other_unzip_error')
+            self.stats.put('-Other error while unzipping file')
             return
         else:
-            self.stats.put('newly_unpacked_zip')
+            self.stats.put('+Unpacked a Zip file')
         self.results.put((crx_id, crx_version, extracted_path, dt_avail))
         self.log_it('Unpack', crx_id)
 
@@ -741,7 +741,7 @@ class CentroidWorker(_MyWorker):
         for k, v in zip((USED_FIELDS + ('_c_size',)), cent_vals):
             cent_dict[USED_TO_DB[k]] = v
         self.results.put((crx_id, crx_version, cent_dict, dt_avail))
-        self.stats.put('centroids_calculated')
+        self.stats.put('+Centroids calculated')
         self.log_it('Centroid calculation', crx_id)
 
 
@@ -814,7 +814,7 @@ class DatabaseWorker(_MyWorker):
                 update(self.extension).where(and_(self.extension.c.ext_id == crx_id,
                                                   self.extension.c.version == crx_version)).\
                     values(last_known_available=dt_avail)
-            self.stats.put('updated_existing_row')
+            self.stats.put('|Updated an existing extension entry in the DB')
         else:
             # Add entry to the database
             cent_vals['ext_id'] = crx_id
@@ -823,7 +823,7 @@ class DatabaseWorker(_MyWorker):
             cent_vals['last_known_available'] = dt_avail
             with self.db_conn.begin():
                 self.db_conn.execute(self.extension.insert().values(cent_vals))
-            self.stats.put('successfully_added_new_row')
+            self.stats.put('+Successfully added a new extension entry in the DB')
 
         self.count += 1
         if not self.count % 1000:
@@ -867,7 +867,7 @@ class StatsProcessor(_MyWorker):
 
     def _log_stat(self):
         with open('stats.json', 'w') as fout:
-            json.dump(self.stats, fout, indent=2)
+            json.dump(self.stats, fout, indent=2, sort_keys=True)
         del fout
 
     def leave(self):
