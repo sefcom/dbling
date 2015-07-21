@@ -43,6 +43,7 @@ from sqlalchemy.exc import IntegrityError
 import stat
 from string import ascii_lowercase
 import threading
+from time import sleep
 from unpack import unpack
 from zipfile import BadZipFile
 
@@ -626,7 +627,20 @@ class DownloadWorker(_MyWorker):
         :rtype: None
         """
         # Check that the ID is for a valid extension
-        r = requests.get('https://chrome.google.com/webstore/detail/%s' % crx_id, allow_redirects=False)
+        tries = 0
+        while True:
+            tries += 1
+            try:
+                r = requests.get('https://chrome.google.com/webstore/detail/%s' % crx_id, allow_redirects=False)
+            except requests.ConnectionError:
+                if tries < 5:
+                    sleep(2)  # Problem may resolve itself by waiting for a bit before retrying
+                else:
+                    logging.warning('%s  Problem connecting to verify extension ID' % crx_id)
+                    self.stats.put('-Connection error when verifying extension ID')
+                    return
+            else:
+                break
         try:
             assert r.status_code == 301  # If we don't get a 301, the extension is invalid
         except AssertionError:
