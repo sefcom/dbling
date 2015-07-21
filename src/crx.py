@@ -13,6 +13,9 @@ Options:
          Set number of worker threads. [Default: 5]
  -u      Just update the list of IDs. Exact opposite of -s. No other
          parameters will have effect when this is specified, except -p.
+ --log=LEVEL
+         Set the logging level to LEVEL. Can be one of: CRITICAL, ERROR,
+         WARNING, INFO, DEBUG, NOTSET. [Default: INFO]
 
 The update process is very memory-intensive. For this reason, it is typically
 best to run the tool with the -u option first, then run it again with -s. It's
@@ -879,13 +882,18 @@ class StatsProcessor(_MyWorker):
             self._log_stat()
         del stat_type
 
-    def _log_stat(self):
-        with open('stats.json', 'w') as fout:
+    def _log_stat(self, use_timestamp=False):
+        if use_timestamp:
+            fname = 'stats_%s.json' % datetime.today().strftime('%Y%m%d-%H%M%S')
+        else:
+            fname = 'stats.json'
+
+        with open(fname, 'w') as fout:
             json.dump(self.stats, fout, indent=2, sort_keys=True)
         del fout
 
     def leave(self):
-        self._log_stat()
+        self._log_stat(use_timestamp=True)
 
 
 if __name__ == '__main__':
@@ -906,7 +914,9 @@ if __name__ == '__main__':
         del _fout
         DBLING_DIR = path.abspath(path.join(path.expandvars('$DBLING')))
     log_format = '%(asctime)s %(levelname) 8s -- %(message)s'
-    logging.basicConfig(filename=_log_path, level=logging.INFO, format=log_format)
+    assert args['--log'] in ('CRITICAL', 'ERROR', 'WARNING', 'INFO', 'DEBUG', 'NOTSET')
+    log_level = getattr(logging, args['--log'])
+    logging.basicConfig(filename=_log_path, level=log_level, format=log_format)
 
     # Get the configuration
     with open(path.join(DBLING_DIR, 'src', 'crx_conf.json')) as _fin:
