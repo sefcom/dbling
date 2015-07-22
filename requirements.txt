@@ -3,3 +3,10 @@ docopt
 pexpect
 beautifulsoup4
 requests
+matplotlib
+networkx
+pyparsing==1.5.7
+colorama
+lxml
+sqlalchemy
+plotly
