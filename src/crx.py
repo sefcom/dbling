@@ -29,6 +29,7 @@ gracefully handle shutdown.
 """
 
 from centroid import *
+from chrome_db import *
 from datetime import date, datetime, timedelta
 from docopt import docopt
 import graph_tool.all as gt
@@ -40,8 +41,7 @@ import os
 from os import path
 import queue
 import requests
-from sqlalchemy import create_engine, engine_from_config, MetaData, engine, Table, Column, String, Integer, Index, \
-    DateTime, select, and_, update, Float
+from sqlalchemy import MetaData, Table, select, and_, update
 from sqlalchemy.exc import IntegrityError
 import stat
 from string import ascii_lowercase
@@ -71,7 +71,6 @@ USED_TO_DB = {'_c_ctime': 'ctime',
               '_c_size': 'size'}
 CHROME_VERSION = None
 DOWNLOAD_URL = None
-DB_ENGINE = None
 DBLING_DIR = None
 
 
@@ -290,73 +289,15 @@ def _set_vertex_props(digraph, vertex, filename):
     return filename_id
 
 
-def _init_db(db_conf):
-    """
-    Initialize the database by ensuring the engine is instantiated and the
-    'extension' table has been created with the proper columns.
-
-    :param db_conf: Configuration settings, from crx_conf.json key "db".
-    :type db_conf: dict
-    :return: The metadata object bound to the engine.
-    :rtype: MetaData
-    """
-    # Make sure the engine object has been created
-    global DB_ENGINE
-    if DB_ENGINE is None or not isinstance(DB_ENGINE, engine.Engine):
-        if 'sqlalchemy.url' not in db_conf:
-            create_str = db_conf['type'] + '://'
-            if len(db_conf['user']):
-                create_str += db_conf['user']
-                if len(db_conf['pass']):
-                    create_str += ':' + db_conf['pass']
-                create_str += '@'
-            create_str += path.join(db_conf['url'], db_conf['name'])
-            DB_ENGINE = create_engine(create_str)
-        else:
-            DB_ENGINE = engine_from_config(db_conf)
-
-    # Make sure the database has the structure we need it to
-    metadata = MetaData()
-    metadata.bind = DB_ENGINE
-
-    extension = Table('extension', metadata,
-                      Column('pk', Integer, primary_key=True),
-                      Column('ext_id', String(32)),
-                      Column('version', String(20)),
-                      Column('last_known_available', DateTime(True)),
-                      Column('profiled', DateTime(True)),
-
-                      # Centroid fields
-                      Column('size', Float),
-                      Column('ctime', Float),
-                      Column('num_dirs', Float),
-                      Column('num_files', Float),
-                      Column('perms', Float),
-                      Column('depth', Float),
-                      Column('type', Float),
-
-                      # Unique index on the extension ID and version
-                      Index('idx_id_ver', 'ext_id', 'version', unique=True)
-                      )
-    extension.create(checkfirst=True)
-
-    id_list = Table('id_list', metadata,
-                    Column('ext_id', String(32), primary_key=True)
-                    )
-    id_list.create(checkfirst=True)
-
-    return metadata
-
-
-def _update_crx_list(ext_url, db_meta, show_progress=False):
+def _update_crx_list(ext_url, show_progress=False):
     # Download the list of extensions
     logging.info('Downloading list of extensions.')
     resp = requests.get(ext_url)
     resp.raise_for_status()  # If there was an HTTP error, raise it
 
     # Get database handles
-    id_list = Table('id_list', db_meta)
-    db_conn = db_meta.bind.connect()
+    id_list = Table('id_list', DB_META)
+    db_conn = DB_META.bind.connect()
 
     # Save the list
     local_sitemap = path.join(DBLING_DIR, 'src', 'chrome_sitemap.xml')
@@ -403,9 +344,6 @@ def update_database(download_fresh_list=True, thread_count=5, queue_max=25, show
     # Try to conserve memory usage
     del fin
 
-    # Connect to database
-    db_meta = _init_db(conf['db'])
-
     # Check to see if we need to recover from a previously failed run
     backup_file = path.join(DBLING_DIR, 'src', 'recovery.bak')
     if path.exists(backup_file):
@@ -414,11 +352,11 @@ def update_database(download_fresh_list=True, thread_count=5, queue_max=25, show
         with open(backup_file) as fin:
             start_at = fin.read(2)  # Only need the first 2 characters
 
-    # This allows the calling function to specify a local filename to use instead of downloading a fresh sitemap
-    # from Google, which takes a while to finish.
+    # This allows us to either use the list of extension IDs already in the database or download a fresh sitemap
+    # from Google.
     if download_fresh_list:
         try:
-            _update_crx_list(conf['extension_list_url'], db_meta, show_progress)
+            _update_crx_list(conf['extension_list_url'], show_progress)
         except:
             logging.critical('Something bad happened while updating the CRX list.', exc_info=1)
             raise
@@ -451,7 +389,7 @@ def update_database(download_fresh_list=True, thread_count=5, queue_max=25, show
         c_threads.append(CentroidWorker(directories, centroids, stats))
 
     # Create database worker and error processor threads
-    db_thread = DatabaseWorker(centroids, db_meta, backup_file, stats)
+    db_thread = DatabaseWorker(centroids, DB_META, backup_file, stats)
     stat_thread = StatsProcessor(stats, start_at)
     all_threads = d_threads + u_threads + c_threads + [db_thread, stat_thread]
 
@@ -460,8 +398,8 @@ def update_database(download_fresh_list=True, thread_count=5, queue_max=25, show
         t.start()
 
     # Get database handles
-    id_table = Table('id_list', db_meta)
-    db_conn = db_meta.bind.connect()
+    id_table = Table('id_list', DB_META)
+    db_conn = DB_META.bind.connect()
 
     if start_at is None:
         logging.info('Adding each CRX to the queue.')
@@ -929,12 +867,8 @@ if __name__ == '__main__':
     DOWNLOAD_URL = _conf['url']
 
     if args['-u']:
-        # Connect to database
-        _db_meta = _init_db(_conf['db'])
-
-        # This allows the calling function to specify a local filename to use instead of downloading a fresh sitemap
-        # from Google, which takes a while to finish.
-        _update_crx_list(_conf['extension_list_url'], _db_meta, show_progress=args['-p'])
+        # Just download the current version of the sitemap from Google, then exit
+        _update_crx_list(_conf['extension_list_url'], show_progress=args['-p'])
         exit(0)
 
     logging.info('Starting CRX downloader.')
