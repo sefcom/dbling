@@ -237,6 +237,7 @@ class ColorDiff(object):
         ex_pat_shadow = re.compile('^/?home/\.shadow/(.+)')
         in_pat_home = re.compile('^/?home$')
         in_pat_shadow = re.compile('^/?home/\.shadow$')
+        in_pat_vault = re.compile('^/?home/\.shadow/[0-9a-z]*?/vault/user/')
         enc_pat = re.compile('/ECRYPTFS_FNEK_ENCRYPTED\.([^/]*)$')
 
         # Node info storage
@@ -328,18 +329,10 @@ class ColorDiff(object):
                 filename_id = sha256(filename.encode('utf-8')).hexdigest()
 
                 # Get depth from /home
-                dir_depth = 0
-                _head = filename
-                while True:
-                    prev_head = _head
-                    _head, _tail = path.split(_head)
-                    if prev_head == _head:
-                        break
-                    if len(_tail) == 0:
-                        continue
-                    dir_depth += 1
-                    if len(_head) == 0:
-                        break
+                dir_depth = get_dir_depth(filename)
+                # Files of interest to us should be in the .../vault/user/ dir and have a depth of at least 7
+                # (when we're filtering, that is)
+                gt_min_depth = bool(re.match(in_pat_vault, filename)) and dir_depth >= MIN_DEPTH
 
                 fs_offset = float('inf')
                 for fs in file_obj.iter_grandchild('byte_runs', 'byte_run'):
@@ -382,7 +375,7 @@ class ColorDiff(object):
                          "encrypted": encrypted,
                          "eval": EVAL_NONE,  # Used for trimming the graph
                          "dir_depth": dir_depth,
-                         "gt_min_depth": dir_depth >= MIN_DEPTH,
+                         "gt_min_depth": gt_min_depth,
                          }
 
                 # Stubborn parameters
@@ -613,13 +606,130 @@ class ColorDiff(object):
         return any_children_true
 
 
+class _ExtensionSubTree(object):
+
+    def __init__(self, start_vertex):
+        """
+        Using the start_vertex, gather basic data about this sub-graph.
+
+        :param start_vertex:
+        :type start_vertex: graph_tool.Vertex
+        :return:
+        """
+        self._is_valid_extension = True  # Innocent until proven guilty
+        self.digr = start_vertex.get_graph(start_vertex)
+
+        # Find the top-most vertex
+        self._top_vertex = self._get_top_vertex(start_vertex)
+
+        # Determine if top vertex is a dir and has only dir children
+        if not vertex_is_dir(self._top_vertex) or not self._children_all_dirs():
+            self._is_valid_extension = False
+
+        # Gather a list of all vertices in this sub-graph
+        self._all_vertices = self._get_all_vertices()
+
+    @property
+    def is_valid(self):
+        return self._is_valid_extension
+
+    @property
+    def vertices(self):
+        """
+        Return an iterator over the vertices in this subgraph.
+
+        :return: Iterator over the vertices in this subgraph.
+        :rtype: list_iterator
+        """
+        return self._all_vertices.__iter__()
+
+    @staticmethod
+    def _get_top_vertex(vertex):
+        while True:
+            if vertex.in_degree() == 0:
+                return vertex
+            elif vertex.in_degree() == 1:
+                vertex = list(vertex.in_neighbours())[0]
+            else:
+                raise TypeError('Start vertex is in a non-tree graph.')
+
+    def _children_all_dirs(self):
+        # Top vertex must have at least one neighbor to pass the test
+        all_dirs = bool(self._top_vertex.out_degree())
+        for v in self._top_vertex.out_neighbours():
+            all_dirs &= vertex_is_dir(v)
+        return all_dirs
+
+    def _get_all_vertices(self, vertex=None):
+        """
+        Generate and return a list of all the vertices in this subgraph.
+
+        :return: A list of the vertex objects belonging to this subgraph.
+        :rtype: list
+        """
+        if vertex is None:
+            vertex = self._top_vertex
+        v = [vertex]
+        for n in vertex.out_neighbours():
+            v += self._get_all_vertices(n)
+        return v
+
+
+def vertex_is_dir(vertex, strict=False):
+    """
+    Given a vertex, return whether it represents a directory.
+
+    :param vertex: The vertex to test.
+    :type vertex: graph_tool.Vertex
+    :param strict: If True, the first type stored in the vertex property
+        vector must be the one that indicates a directory. Otherwise, any of
+        the values in the vector that match will return True.
+    :type strict: bool
+    :return: Whether the vertex represents a directory.
+    :rtype: bool
+    """
+    graph = vertex.get_graph(vertex)
+    if strict:
+        return graph.vp['type'][vertex][0] == 2
+
+    for t in graph.vp['type'][vertex]:
+        if t == 2:
+            return True
+    return False
+
+
+def get_dir_depth(filename):
+    """
+    Calculate how many directories deep the filename is.
+
+    :param filename: The path to be split and counted.
+    :type filename: str
+    :return: The number of directory levels in the filename.
+    :rtype: int
+    """
+    dir_depth = 0
+    _head = filename
+    while True:
+        prev_head = _head
+        _head, _tail = path.split(_head)
+        if prev_head == _head:
+            break
+        if len(_tail) == 0:
+            continue
+        dir_depth += 1
+        if len(_head) == 0:
+            break
+    return dir_depth
+
+
+FILTERED_MIN_DEPTH = get_dir_depth('/home/.shadow/<user ID>/vault/user/<encrypted Extensions>/<encrypted extension ID>/')
+
+
 def main(args):
     # Set min depth
     global MIN_DEPTH
     if args['-d']:
-        MIN_DEPTH = 7
-    else:
-        MIN_DEPTH = 0
+        MIN_DEPTH = FILTERED_MIN_DEPTH
 
     try:
         img_dir = os.environ['DBLING_IMGS']
