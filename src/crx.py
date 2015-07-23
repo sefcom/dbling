@@ -46,8 +46,8 @@ from sqlalchemy.exc import IntegrityError
 import stat
 from string import ascii_lowercase
 import threading
-from time import sleep
 from unpack import unpack
+from util import verify_crx_availability, validate_crx_id
 from zipfile import BadZipFile
 
 # Make 'requests' library only log things if they're at least a warning
@@ -94,9 +94,7 @@ def download(crx_id, save_path=None):
     :rtype: str
     """
     # Validate the CRX ID
-    assert isinstance(crx_id, str)
-    assert crx_id.isalnum()
-    assert len(crx_id) == 32
+    validate_crx_id(crx_id)
 
     # Make the download request
     # For details about the URL, see http://chrome-extension-downloader.com/how-does-it-work.php
@@ -568,28 +566,19 @@ class DownloadWorker(_MyWorker):
         :rtype: None
         """
         # Check that the ID is for a valid extension
-        tries = 0
-        while True:
-            tries += 1
-            try:
-                r = requests.get('https://chrome.google.com/webstore/detail/%s' % crx_id, allow_redirects=False)
-            except requests.ConnectionError:
-                if tries < 5:
-                    sleep(2)  # Problem may resolve itself by waiting for a bit before retrying
-                else:
-                    logging.warning('%s  Problem connecting to verify extension ID' % crx_id)
-                    self.stats.put('-Connection error when verifying extension ID')
-                    return
-            else:
-                break
         try:
-            assert r.status_code == 301  # If we don't get a 301, the extension is invalid
-        except AssertionError:
-            # This could mean a few things. Either it was never a valid extension ID, it was taken down by Google,
-            # or the author removed it.
-            # TODO: Update the database. Mark this extension as invalid.
-            self.stats.put('-Invalid extension ID: No 301 status when expected')
+            valid = verify_crx_availability(crx_id)
+        except requests.ConnectionError:
+            logging.warning('%s  Problem connecting to verify extension ID' % crx_id)
+            self.stats.put('-Connection error when verifying extension ID')
             return
+        else:
+            if not valid:
+                # This could mean a few things. Either it was never a valid extension ID, it was taken down by Google,
+                # or the author removed it.
+                # TODO: Update the database. Mark this extension as invalid.
+                self.stats.put('-Invalid extension ID: No 301 status when expected')
+                return
 
         # Download the CRX file, put the full save path on the results queue
         try:
