@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Usage: color_diff.py [options]
+Usage: graph_diff.py [options]
 
 Options:
  -f FILE   Save duplicate data to FILE
@@ -9,7 +9,7 @@ Options:
 
 """
 
-from colorama import init, Back, Fore  # BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE, RESET
+import clr
 from docopt import docopt
 import graph_tool.all as gt
 from hashlib import sha256
@@ -19,7 +19,7 @@ from lxml import etree
 import os
 from os import path
 import re
-init(autoreset=True)
+import util
 
 
 FILE = 1
@@ -35,19 +35,6 @@ EVAL_FALSE = 0
 
 INODE_ONLY = False
 HASH_LABEL = True
-
-
-class Clr:
-    _color_it = lambda t, c, b: getattr(bool(b) and Back or Fore, c) + str(t) + \
-                                getattr(bool(b) and Back or Fore, 'RESET')
-    black = lambda t, b=True: Clr._color_it(t, 'BLACK', b)
-    red = lambda t, b=True: Clr._color_it(t, 'RED', b)
-    green = lambda t, b=True: Clr._color_it(t, 'GREEN', b)
-    yellow = lambda t, b=True: Clr._color_it(t, 'YELLOW', b)
-    blue = lambda t, b=True: Clr._color_it(t, 'BLUE', b)
-    magenta = lambda t, b=True: Clr._color_it(t, 'MAGENTA', b)
-    cyan = lambda t, b=True: Clr._color_it(t, 'CYAN', b)
-    white = lambda t, b=True: Clr._color_it(t, 'WHITE', b)
 
 
 class DuplicatesCompleted(Exception):
@@ -84,9 +71,9 @@ class FileObj(object):
         return self._obj
 
 
-class ColorDiff(object):
+class _GraphDiff(object):
 
-    def __init__(self, dupl_file=None, verbose_log=False):
+    def __init__(self, dupl_file=None):
         self.digr = gt.Graph()
         self.type_count = {}
         self.home_vertex = None
@@ -94,32 +81,32 @@ class ColorDiff(object):
         self.gi = {}  # graph indexes: maps vertex "labels" to vertex objects
 
         # Create the internal property maps
-        self.digr.vertex_properties['inode'] = self.digr.new_vertex_property('int')
-        self.digr.vertex_properties['parent_inode'] = self.digr.new_vertex_property('int')
-        self.digr.vertex_properties['filename_id'] = self.digr.new_vertex_property('string')
-        self.digr.vertex_properties['filename_end'] = self.digr.new_vertex_property('string')
-        self.digr.vertex_properties['name_type'] = self.digr.new_vertex_property('string')
-        self.digr.vertex_properties['type'] = self.digr.new_vertex_property('vector<short>')
-        self.digr.vertex_properties['alloc'] = self.digr.new_vertex_property('bool')
-        self.digr.vertex_properties['used'] = self.digr.new_vertex_property('bool')
-        self.digr.vertex_properties['fs_offset'] = self.digr.new_vertex_property('string')
-        self.digr.vertex_properties['filesize'] = self.digr.new_vertex_property('string')
-        self.digr.vertex_properties['src_files'] = self.digr.new_vertex_property('vector<short>')
-        self.digr.vertex_properties['encrypted'] = self.digr.new_vertex_property('bool')
-        self.digr.vertex_properties['eval'] = self.digr.new_vertex_property('bool')
-        self.digr.vertex_properties['size'] = self.digr.new_vertex_property('string')
-        self.digr.vertex_properties['mode'] = self.digr.new_vertex_property('string')
-        self.digr.vertex_properties['uid'] = self.digr.new_vertex_property('string')
-        self.digr.vertex_properties['gid'] = self.digr.new_vertex_property('string')
-        self.digr.vertex_properties['nlink'] = self.digr.new_vertex_property('string')
-        self.digr.vertex_properties['mtime'] = self.digr.new_vertex_property('string')
-        self.digr.vertex_properties['ctime'] = self.digr.new_vertex_property('string')
-        self.digr.vertex_properties['atime'] = self.digr.new_vertex_property('string')
-        self.digr.vertex_properties['crtime'] = self.digr.new_vertex_property('string')
-        self.digr.vertex_properties['color'] = self.digr.new_vertex_property('vector<float>')
-        self.digr.vertex_properties['shape'] = self.digr.new_vertex_property('string')
-        self.digr.vertex_properties['dir_depth'] = self.digr.new_vertex_property('short')
-        self.digr.vertex_properties['gt_min_depth'] = self.digr.new_vertex_property('bool')
+        self.digr.vp['inode'] = self.digr.new_vertex_property('int')
+        self.digr.vp['parent_inode'] = self.digr.new_vertex_property('int')
+        self.digr.vp['filename_id'] = self.digr.new_vertex_property('string')
+        self.digr.vp['filename_end'] = self.digr.new_vertex_property('string')
+        self.digr.vp['name_type'] = self.digr.new_vertex_property('string')
+        self.digr.vp['type'] = self.digr.new_vertex_property('vector<short>')
+        self.digr.vp['alloc'] = self.digr.new_vertex_property('bool')
+        self.digr.vp['used'] = self.digr.new_vertex_property('bool')
+        self.digr.vp['fs_offset'] = self.digr.new_vertex_property('string')
+        self.digr.vp['filesize'] = self.digr.new_vertex_property('string')
+        self.digr.vp['src_files'] = self.digr.new_vertex_property('vector<short>')
+        self.digr.vp['encrypted'] = self.digr.new_vertex_property('bool')
+        self.digr.vp['eval'] = self.digr.new_vertex_property('bool')
+        self.digr.vp['size'] = self.digr.new_vertex_property('string')
+        self.digr.vp['mode'] = self.digr.new_vertex_property('string')
+        self.digr.vp['uid'] = self.digr.new_vertex_property('string')
+        self.digr.vp['gid'] = self.digr.new_vertex_property('string')
+        self.digr.vp['nlink'] = self.digr.new_vertex_property('string')
+        self.digr.vp['mtime'] = self.digr.new_vertex_property('string')
+        self.digr.vp['ctime'] = self.digr.new_vertex_property('string')
+        self.digr.vp['atime'] = self.digr.new_vertex_property('string')
+        self.digr.vp['crtime'] = self.digr.new_vertex_property('string')
+        self.digr.vp['color'] = self.digr.new_vertex_property('vector<float>')
+        self.digr.vp['shape'] = self.digr.new_vertex_property('string')
+        self.digr.vp['dir_depth'] = self.digr.new_vertex_property('short')
+        self.digr.vp['gt_min_depth'] = self.digr.new_vertex_property('bool')
 
         # Set the "label" for vertices
         if INODE_ONLY:
@@ -127,28 +114,19 @@ class ColorDiff(object):
         elif HASH_LABEL:
             self._id = 'filename_id'
 
-        # Initialize logging
-        self._log_path = path.join(path.dirname(path.realpath(__file__)), '../log', "color_diff.log")
-        with open(self._log_path, 'a') as fout:
-            fout.write((' --  '*15)+'\n')
-        log_format = '%(asctime)s %(levelname) 8s -- %(message)s'
-        if verbose_log:
-            log_level = logging.DEBUG
-        else:
-            log_level = logging.INFO
-        logging.basicConfig(filename=self._log_path, level=log_level, format=log_format)
-        logging.info('DFXML Color Diff initialized.')
+        # Queue for removing vertices
+        self._to_remove = []
 
     def deinit(self, clean=True, dup=False):
         if clean:
             logging.info('Execution completed cleanly. Shutting down.')
-        elif dup:
+        elif dup and self.dupl_file is not None:
             logging.info('Exiting. Duplicates written to file: %s' % self.dupl_file)
         else:
-            logging.warning('Unclean shutdown. Did not finish graphing the diffs.')
+            logging.warning('Unclean shutdown. Did not finish processing the diffs.')
         logging.shutdown()  # Flush and close all handlers
 
-    def show_graph(self, fig_filename):
+    def show_graph(self):
         # TODO: If this needs to support more than MAX_FILES==3, rewrite this
         num_drawn = 0.0  # To get floating point answer when dividing later
         next_logged = 0.25
@@ -214,7 +192,7 @@ class ColorDiff(object):
                       edge_marker_size=marker,
                       )
 
-    def add_from_file(self, file_path, img_file_id=0):
+    def add_from_file(self, file_path, img_file_id=1):
         """
         Given the path to a DFXML file, add nodes and edges to the digraph
         representing its fileobjects.
@@ -222,8 +200,8 @@ class ColorDiff(object):
         :param file_path: Path to the DFXML file from which to create the digraph.
         :type file_path: str
         :param img_file_id: ID number for the image file being processed. Used
-                            to identify file objects that are common or unique
-                            to each of the images.
+            to identify file objects that are common or unique to each of the
+            images.
         :type img_file_id: int
         :return: None
         :rtype: None
@@ -457,7 +435,7 @@ class ColorDiff(object):
         class constructor on instantiation.
 
         :param duplicates: List of 2-tuples: (original vertex index, attribute
-                           dict of the duplicate)
+            dict of the duplicate)
         :type duplicates: list
         :return: None
         :rtype: None
@@ -472,8 +450,8 @@ class ColorDiff(object):
         header = dstring % ("inode", "pinode", "nt", "ty", "al", "ud", "mode", "nlk", "uid", "gid", "Start",
                             "Length", "Modified Time", "inode Changed Time", "Accessed Time", "Created Time",
                             "Filename Hash Tail", "Filename Tail")
-        break_str = Clr.green(('--   ' * ((len(header) / 5) + 1))[:len(header)], False)
-        header = Clr.yellow(Clr.black(header, False)) + '\n'
+        break_str = clr.green(('--   ' * ((len(header) / 5) + 1))[:len(header)], False)
+        header = clr.yellow(clr.black(header, False)) + '\n'
         line_count = 0
 
         with open(self.dupl_file, 'w') as dout:
@@ -510,7 +488,7 @@ class ColorDiff(object):
                                 yf = yf[0]
 
                     if xf == '?':
-                        xf = Clr.cyan(('% ' + n + 's') % '?', False)
+                        xf = clr.cyan(('% ' + n + 's') % '?', False)
 
                     x_fields.append(xf)
 
@@ -518,9 +496,9 @@ class ColorDiff(object):
                         y_fields.append(yf)
                     else:
                         if y[k] == '?':
-                            y_fields.append(Clr.blue(' ' * (int(n) - 1) + Clr.cyan('?', False)))
+                            y_fields.append(clr.blue(' ' * (int(n) - 1) + clr.cyan('?', False)))
                         else:
-                            y_fields.append(Clr.blue(('% ' + n + 's') % yf))
+                            y_fields.append(clr.blue(('% ' + n + 's') % yf))
 
                 dout.write(dstring % tuple(x_fields) + '\n')
                 dout.write(dstring % tuple(y_fields) + '\n')
@@ -535,7 +513,7 @@ class ColorDiff(object):
         child vertices of "home".
 
         :param filter_depth: If True, all nodes with a depth < MIN_DEPTH will
-                             also be removed from the graph.
+            also be removed from the graph.
         :type filter_depth: bool
         :return: None
         :rtype: None
@@ -549,10 +527,15 @@ class ColorDiff(object):
             # This should only have one item (.shadow), but just in case...
             self._check_eval(n)
 
+        # Remove the vertices marked for removal
+        for v in self._to_remove:
+            self.gi.pop(self.digr.vp[self._id][v])
+        self.digr.remove_vertex(self._to_remove)
+        self._to_remove = []
+
         deg_diff = deg_before - self.digr.num_vertices()
 
-        logging.info('Finished trimming %d unuseful nodes from the graph. Distinct nodes and their parents remain.'
-                     % deg_diff)
+        logging.info('Finished trimming %d unuseful nodes from the graph.' % deg_diff)
 
         if filter_depth:
             # Using an actual filter is faster, but I couldn't get the stupid thing to work right.
@@ -565,6 +548,20 @@ class ColorDiff(object):
                     rm_verts.append(v)
             self.digr.remove_vertex(rm_verts)
             logging.debug('Removed all vertices with dir depth < %d' % MIN_DEPTH)
+
+    def _check_eval(self, vertex):
+        raise NotImplementedError
+
+
+class ColorDiff(_GraphDiff):
+
+    def __init__(self, dupl_file=None):
+        super().__init__(dupl_file=dupl_file)
+        logging.info('DFXML ' + clr.black(clr.red('C', False) +
+                                          clr.green('O', False) +
+                                          clr.magenta('L', False) +
+                                          clr.yellow('O', False) +
+                                          clr.cyan('R', False)) + ' Diff initialized.')
 
     def _check_eval(self, vertex):
         """
@@ -582,97 +579,97 @@ class ColorDiff(object):
         """
         # Check if this node has already been evaluated
         if self.digr.vp["eval"][vertex] != EVAL_NONE:
+            # logging.debug('Skipping eval of node: %s' % self.digr.vp[self._id][vertex])
             return self.digr.vp["eval"][vertex]
 
         # If this node is useful by itself, no need to check its children
         if len(self.digr.vp["src_files"][vertex]) < MAX_FILES:
+            # logging.debug('Skipping eval of child nodes of node: %s' % self.digr.vp[self._id][vertex])
             self.digr.vp["eval"][vertex] = EVAL_TRUE
             return True
 
-        children_to_remove = []
         any_children_true = False
         for c in vertex.out_neighbours():
             _e = self._check_eval(c)
             if not _e:
-                children_to_remove.append(c)
+                self._to_remove.append(c)
             any_children_true = any_children_true or _e
-
-        # Remove unneeded children
-        for c in children_to_remove:
-            self.gi.pop(self.digr.vp[self._id][c])
-        self.digr.remove_vertex(children_to_remove)
 
         self.digr.vp["eval"][vertex] = any_children_true
         return any_children_true
 
 
-class _ExtensionSubTree(object):
+class FilesDiff(_GraphDiff):
 
-    def __init__(self, start_vertex):
+    def __init__(self):
+        super().__init__()
+        logging.info('DFXML Files Diff initialized.')
+
+    def _check_eval(self, vertex, force_false=False):
         """
-        Using the start_vertex, gather basic data about this sub-graph.
+        Recursively search successor vertices, evaluating their usefulness. A
+        vertex is useful if:
 
-        :param start_vertex:
-        :type start_vertex: graph_tool.Vertex
-        :return:
+        1. Any of its children are useful
+        2. At least one of the following is true:
+          a. It is a leaf node
+          b. It is at the depth of the Extensions directory and is an
+             encrypted directory
+          c. It is at the depth of either the Extensions directory or the
+             <Extension ID> directory and has only directory successors
+
+        When this recursive method is followed directly by another pass over
+        the vertices to remove all that are not of minimum depth, the
+        subgraphs that remain are prime candidates for extension directories.
+
+        :param vertex: The vertex object to evaluate.
+        :type vertex: Vertex
+        :param force_false: Useful for when a vertex is found that violates a
+            required condition, mark all successor vertices to the given
+            vertex for deletion.
+        :type force_false: bool
+        :return: True (useful, keep) or False (not useful, delete)
+        :rtype: bool
         """
-        self._is_valid_extension = True  # Innocent until proven guilty
-        self.digr = start_vertex.get_graph(start_vertex)
+        # Check if this node has already been evaluated
+        if self.digr.vp["eval"][vertex] != EVAL_NONE:
+            # logging.debug('Skipping eval of node: %s' % self.digr.vp[self._id][vertex])
+            return self.digr.vp["eval"][vertex]
 
-        # Find the top-most vertex
-        self._top_vertex = self._get_top_vertex(start_vertex)
+        if force_false:
+            return self._force_false(vertex)
 
-        # Determine if top vertex is a dir and has only dir children
-        if not vertex_is_dir(self._top_vertex) or not self._children_all_dirs():
-            self._is_valid_extension = False
+        # If this is at the same depth as the Extensions dir, it should be an encrypted directory
+        if self.digr.vp['dir_depth'][vertex] == (FILTERED_MIN_DEPTH - 1) and \
+                (not vertex_is_dir(vertex) or not self.digr.vp['encrypted'][vertex]):
+            return self._force_false(vertex)
 
-        # Gather a list of all vertices in this sub-graph
-        self._all_vertices = self._get_all_vertices()
+        # If this is at the same depth as the Extensions dir or the Extension ID dir, it should have only dir children
+        if self.digr.vp['dir_depth'][vertex] in (FILTERED_MIN_DEPTH, FILTERED_MIN_DEPTH - 1):
+            all_dir_children = vertex.out_degree() > 0
+            for c in vertex.out_neighbours():
+                if not vertex_is_dir(c):
+                    all_dir_children = False
+                    break
+            if not all_dir_children:
+                return self._force_false(vertex)
 
-    @property
-    def is_valid(self):
-        return self._is_valid_extension
+        any_children_true = vertex.out_degree() == 0  # Leaf nodes should be True by default, others False
+        for c in vertex.out_neighbours():
+            _e = self._check_eval(c)
+            if not _e:
+                self._to_remove.append(c)
+            any_children_true = any_children_true or _e
 
-    @property
-    def vertices(self):
-        """
-        Return an iterator over the vertices in this subgraph.
+        self.digr.vp["eval"][vertex] = any_children_true
+        return any_children_true
 
-        :return: Iterator over the vertices in this subgraph.
-        :rtype: list_iterator
-        """
-        return self._all_vertices.__iter__()
-
-    @staticmethod
-    def _get_top_vertex(vertex):
-        while True:
-            if vertex.in_degree() == 0:
-                return vertex
-            elif vertex.in_degree() == 1:
-                vertex = list(vertex.in_neighbours())[0]
-            else:
-                raise TypeError('Start vertex is in a non-tree graph.')
-
-    def _children_all_dirs(self):
-        # Top vertex must have at least one neighbor to pass the test
-        all_dirs = bool(self._top_vertex.out_degree())
-        for v in self._top_vertex.out_neighbours():
-            all_dirs &= vertex_is_dir(v)
-        return all_dirs
-
-    def _get_all_vertices(self, vertex=None):
-        """
-        Generate and return a list of all the vertices in this subgraph.
-
-        :return: A list of the vertex objects belonging to this subgraph.
-        :rtype: list
-        """
-        if vertex is None:
-            vertex = self._top_vertex
-        v = [vertex]
-        for n in vertex.out_neighbours():
-            v += self._get_all_vertices(n)
-        return v
+    def _force_false(self, vertex):
+        self.digr.vp['eval'][vertex] = EVAL_FALSE
+        self._to_remove += list(vertex.out_neighbours())
+        for c in vertex.out_neighbours():
+            self._check_eval(c, force_false=True)
+        return False
 
 
 def vertex_is_dir(vertex, strict=False):
@@ -744,7 +741,20 @@ def main(args):
     to_compare = []
     dfxml_ext = re.compile('\.df\.xml$')
 
-    diff = ColorDiff(dupl_file=args['-f'], verbose_log=args['-v'])
+    # Initialize logging
+    _log_path = path.join(path.dirname(path.realpath(__file__)), '../log', "graph_diff.log")
+    with open(_log_path, 'a') as fout:
+        fout.write((' --  '*15)+'\n')
+    log_format = '%(asctime)s %(levelname) 8s -- %(message)s'
+    if args['-v']:
+        log_level = logging.DEBUG
+    else:
+        log_level = logging.INFO
+    logging.basicConfig(filename=_log_path, level=log_level, format=log_format)
+    util.add_color_log_levels(center=True)
+
+    # Instantiate the diff object and process the files
+    diff = ColorDiff(dupl_file=args['-f'])
     for i in imgs:
         i_pth = path.join(img_dir, i)
         # For info on what this does and what it means, see:
@@ -777,7 +787,7 @@ def main(args):
 
     try:
         diff.trim_unuseful(filter_depth=args['-d'])
-        diff.show_graph('testfig.png')
+        diff.show_graph()
     except:
         diff.deinit(False)
         raise
@@ -785,3 +795,7 @@ def main(args):
 
 if __name__ == '__main__':
     main(docopt(__doc__))
+else:
+    # This file was imported, so do all the necessary configuration
+    MIN_DEPTH = FILTERED_MIN_DEPTH
+    MAX_FILES = 1

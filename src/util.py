@@ -1,4 +1,6 @@
 
+import clr
+import logging
 import requests
 from time import sleep
 
@@ -55,3 +57,26 @@ def validate_crx_id(crx_id):
     assert isinstance(crx_id, str)
     assert crx_id.isalnum()
     assert len(crx_id) == 32
+
+
+def add_color_log_levels(center=False):
+    if center:
+        c = 'CRITICAL'.center(8)
+        e = 'ERROR'.center(8)
+        w = 'WARNING'.center(8)
+        i = 'INFO'.center(8)
+        d = 'DEBUG'.center(8)
+        n = 'NOTSET'.center(8)
+    else:
+        c = 'CRITICAL'
+        e = 'ERROR'
+        w = 'WARNING'
+        i = 'INFO'
+        d = 'DEBUG'
+        n = 'NOTSET'
+    logging.addLevelName(50, clr.black(clr.red(c, True)))
+    logging.addLevelName(40, clr.black(clr.magenta(e, True)))
+    logging.addLevelName(30, clr.black(clr.yellow(w, True)))
+    logging.addLevelName(20, clr.black(clr.blue(i, True)))
+    logging.addLevelName(10, clr.black(clr.green(d, True)))
+    logging.addLevelName(0, clr.black(clr.white(n, True)))
