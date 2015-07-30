@@ -46,6 +46,7 @@ from sqlalchemy.exc import IntegrityError
 import stat
 from string import ascii_lowercase
 import threading
+from time import sleep
 from unpack import unpack
 from util import verify_crx_availability, validate_crx_id
 from zipfile import BadZipFile
@@ -62,13 +63,6 @@ FILE_TYPES = {stat.S_IFREG: 1,
               stat.S_IFIFO: 5,
               stat.S_IFSOCK: 6,
               stat.S_IFLNK: 7}
-USED_TO_DB = {'_c_ctime': 'ctime',
-              '_c_num_child_dirs': 'num_dirs',
-              '_c_num_child_files': 'num_files',
-              '_c_mode': 'perms',
-              '_c_depth': 'depth',
-              '_c_type': 'type',
-              '_c_size': 'size'}
 CHROME_VERSION = None
 DOWNLOAD_URL = None
 DBLING_DIR = None
@@ -99,7 +93,19 @@ def download(crx_id, save_path=None):
     # Make the download request
     # For details about the URL, see http://chrome-extension-downloader.com/how-does-it-work.php
     url = DOWNLOAD_URL.format(CHROME_VERSION, crx_id)
-    resp = requests.get(url, stream=True)
+    # Add some resiliency to how we make the request
+    tries = 0
+    while True:
+        tries += 1
+        try:
+            resp = requests.get(url, stream=True)
+        except requests.ConnectionError:
+            if tries < 5:
+                sleep(2)  # Problem may resolve itself by waiting for a bit before retrying
+            else:
+                raise
+        else:
+            break
     resp.raise_for_status()  # If there was an HTTP error, raise it
 
     # If the URL we got back was the same one we requested, the download failed
@@ -419,6 +425,7 @@ def update_database(download_fresh_list=True, thread_count=5, queue_max=25, show
                 del row
                 if show_progress and not count % 1000:
                     print('.', end='', flush=True)
+        del result, id_table
     except:
         # Try to let every thread stop its work first so we don't exit in as much of an inconsistent state
         for t in all_threads:
@@ -431,8 +438,6 @@ def update_database(download_fresh_list=True, thread_count=5, queue_max=25, show
 
     if show_progress:
         print(count, flush=True)
-    db_conn.close()
-    del result, db_conn, id_table
 
     # Wait until the jobs are done and the results have been processed
     logging.info('All jobs are now on the queue.')
@@ -451,16 +456,20 @@ def update_database(download_fresh_list=True, thread_count=5, queue_max=25, show
     centroids.join()
     db_thread.stop()  # Database worker
 
-    stats.put('+Exited cleanly')
-    stats.join()
-    stat_thread.stop()
-
+    # Take the stat_thread out of the list so we can stop it separately
+    all_threads.pop()
     for t in all_threads:
         t.join()
+
+    db_conn.close()
 
     # Delete the backup file to indicate the run completed successfully
     os.remove(backup_file)
 
+    stats.put('+Exited cleanly')
+    stats.join()
+    stat_thread.stop()
+    stat_thread.join()
     logging.info('All threads have stopped successfully.')
 
 
@@ -601,13 +610,13 @@ class DownloadWorker(_MyWorker):
             # Most likely reasons why this error is raised: 1) the extension is part of an invite-only beta or other
             # restricted distribution, or 2) the extension is listed as being compatible with Chrome OS only.
             # Until we develop a workaround, just skip it.
-            logging.warning('%s  Bad download URL' % crx_id)
+            logging.debug('%s  Bad download URL' % crx_id)
             self.stats.put('-Denied access to download')
             return
         except requests.HTTPError as err:
             # Something bad happened trying to download the actual file. No way to know how to resolve it, so
             # just skip it and move on.
-            logging.warning('%s  Download failed (%s %s)' % (crx_id, err.response.status_code, err.response.reason))
+            logging.debug('%s  Download failed (%s %s)' % (crx_id, err.response.status_code, err.response.reason))
             with open(path.join(DBLING_DIR, 'src', 'failed_downloads.txt'), 'a') as fout:
                 fout.write(crx_id + '\n')
             del fout
@@ -794,7 +803,7 @@ class StatsProcessor(_MyWorker):
                     self.stats = json.load(fin)
             except FileNotFoundError:
                 self.stats = {}
-            self.do_job('times_recovered')
+            self.do_job('|Times recovered from unsuccessful shutdown')
         else:
             self.stats = {}
 

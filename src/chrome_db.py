@@ -4,7 +4,7 @@ Initialize the database by ensuring the engine is instantiated and the
 'extension' table has been created with the proper columns.
 """
 
-__all__ = ['DB_ENGINE', 'DB_META']
+__all__ = ['DB_ENGINE', 'DB_META', 'USED_TO_DB']
 
 import json
 from os import path
@@ -12,7 +12,7 @@ from sqlalchemy import create_engine, engine_from_config, MetaData, Table, Colum
     Index
 
 with open(path.abspath(path.join(path.dirname(path.realpath(__file__)), 'crx_conf.json'))) as fin:
-    db_conf = json.load(fin)
+    db_conf = json.load(fin)['db']
 
 
 if 'sqlalchemy.url' not in db_conf:
@@ -27,9 +27,15 @@ if 'sqlalchemy.url' not in db_conf:
 else:
     DB_ENGINE = engine_from_config(db_conf)
 
-# Make sure the database has the structure we need it to
 DB_META = MetaData()
 DB_META.bind = DB_ENGINE
+USED_TO_DB = {'_c_ctime': 'ctime',
+              '_c_num_child_dirs': 'num_dirs',
+              '_c_num_child_files': 'num_files',
+              '_c_mode': 'perms',
+              '_c_depth': 'depth',
+              '_c_type': 'type',
+              '_c_size': 'size'}
 
 # Create the extension table
 extension = Table('extension', DB_META,
@@ -37,6 +43,7 @@ extension = Table('extension', DB_META,
                   Column('ext_id', String(32)),
                   Column('version', String(20)),
                   Column('last_known_available', DateTime(True)),
+                  Column('last_known_unavailable', DateTime(True)),
                   Column('profiled', DateTime(True)),
 
                   # Centroid fields
@@ -47,6 +54,17 @@ extension = Table('extension', DB_META,
                   Column('perms', Float),
                   Column('depth', Float),
                   Column('type', Float),
+                  Column('centroid_group', Integer),
+
+                  # Image centroid fields, calculated after installing
+                  Column('i_size', Float),
+                  Column('i_ctime', Float),
+                  Column('i_num_dirs', Float),
+                  Column('i_num_files', Float),
+                  Column('i_perms', Float),
+                  Column('i_depth', Float),
+                  Column('i_type', Float),
+                  Column('i_centroid_group', Integer),
 
                   # Unique index on the extension ID and version
                   Index('idx_id_ver', 'ext_id', 'version', unique=True)
