@@ -48,7 +48,7 @@ from string import ascii_lowercase
 import threading
 from time import sleep
 from unpack import unpack
-from util import verify_crx_availability, validate_crx_id
+from util import verify_crx_availability
 from zipfile import BadZipFile
 
 # Make 'requests' library only log things if they're at least a warning
@@ -72,7 +72,11 @@ class BadDownloadURL(Exception):
     pass
 
 
-def download(crx_id, save_path=None):
+class DuplicateDownload(Exception):
+    pass
+
+
+def download(crx_id, save_path=None, resp_obj=None):
     """
     Given an extension ID, download the .crx file. If save_path is given, save
     the CRX to that directory, otherwise fall back to the default specified in
@@ -84,33 +88,21 @@ def download(crx_id, save_path=None):
     :type crx_id: str
     :param save_path: Directory where the CRX should be saved.
     :type save_path: str|None
+    :param resp_obj: The Response object to work with instead of initiating
+        the download in this function. If not given, a call will be made to
+        _get_resp_obj().
+    :type resp_obj: requests.Response|None
     :return: The full path of the saved file.
     :rtype: str
     """
     # Validate the CRX ID
-    validate_crx_id(crx_id)
+    # validate_crx_id(crx_id)  # Unnecessary since we've already validated it.
 
-    # Make the download request
-    # For details about the URL, see http://chrome-extension-downloader.com/how-does-it-work.php
-    url = DOWNLOAD_URL.format(CHROME_VERSION, crx_id)
-    # Add some resiliency to how we make the request
-    tries = 0
-    while True:
-        tries += 1
-        try:
-            resp = requests.get(url, stream=True)
-        except requests.ConnectionError:
-            if tries < 5:
-                sleep(2)  # Problem may resolve itself by waiting for a bit before retrying
-            else:
-                raise
-        else:
-            break
-    resp.raise_for_status()  # If there was an HTTP error, raise it
-
-    # If the URL we got back was the same one we requested, the download failed
-    if url == resp.url:
-        raise BadDownloadURL
+    assert isinstance(resp_obj, requests.Response)
+    if resp_obj is None:
+        resp = _get_resp_obj(crx_id)
+    else:
+        resp = resp_obj
 
     # Save the CRX file
     filename = crx_id + resp.url.rsplit('extension', 1)[-1]  # ID + version
@@ -135,6 +127,41 @@ def download(crx_id, save_path=None):
 
     # Return the full path where the CRX was saved
     return full_save_path
+
+
+def _get_resp_obj(crx_id):
+    """
+    Make the download request, but just return it instead of actually
+    processing it. This allows us to do some checks on the response before
+    actually downloading the whole file.
+
+    :param crx_id: The ID of the extension of interest.
+    :type crx_id: str
+    :return: The Response object for downloading the extension.
+    :rtype: requests.Response
+    """
+    # Make the download request
+    # For details about the URL, see http://chrome-extension-downloader.com/how-does-it-work.php
+    url = DOWNLOAD_URL.format(CHROME_VERSION, crx_id)
+    # Add some resiliency to how we make the request
+    tries = 0
+    while True:
+        tries += 1
+        try:
+            resp = requests.get(url, stream=True)
+        except requests.ConnectionError:
+            if tries < 5:
+                sleep(2)  # Problem may resolve itself by waiting for a bit before retrying
+            else:
+                raise
+        else:
+            break
+    resp.raise_for_status()  # If there was an HTTP error, raise it
+
+    # If the URL we got back was the same one we requested, the download failed
+    if url == resp.url:
+        raise BadDownloadURL
+    return resp
 
 
 def calc_chrome_version(last_version, release_date, release_period=10):
@@ -382,20 +409,23 @@ def update_database(download_fresh_list=True, thread_count=5, queue_max=25, show
     directories = queue.Queue(queue_max)
     centroids = queue.Queue(queue_max)
     stats = queue.Queue(queue_max)
+    backup_queue = queue.Queue()
 
     # Create the worker threads
     d_threads = []
     u_threads = []
     c_threads = []
     for i in range(thread_count):
-        d_threads.append(DownloadWorker(crx_ids, zip_files, save_path, stats))
+        d_threads.append(DownloadWorker(crx_ids, zip_files, save_path, stats, DB_META, backup_queue))
         u_threads.append(UnpackWorker(zip_files, directories, extract_dir, stats))
         c_threads.append(CentroidWorker(directories, centroids, stats))
 
-    # Create database worker and error processor threads
-    db_thread = DatabaseWorker(centroids, DB_META, backup_file, stats)
+    # Create database worker, error processor, and backup worker threads
+    db_thread = DatabaseWorker(centroids, DB_META, stats)
+    backup_thread = BackupWorker(backup_queue, backup_file)
     stat_thread = StatsProcessor(stats, start_at)
-    all_threads = d_threads + u_threads + c_threads + [db_thread, stat_thread]
+    # The stats thread always has to come last in this list or else the pop() below won't work right
+    all_threads = d_threads + u_threads + c_threads + [db_thread, backup_thread, stat_thread]
 
     # Start all the downloader and unpacker threads
     for t in all_threads:
@@ -444,6 +474,9 @@ def update_database(download_fresh_list=True, thread_count=5, queue_max=25, show
     crx_ids.join()
     for t in d_threads:  # Download workers
         t.stop()
+
+    backup_queue.join()
+    backup_thread.stop()  # Backup worker
 
     zip_files.join()
     for t in u_threads:  # Unpack workers
@@ -559,10 +592,33 @@ class DownloadWorker(_MyWorker):
     Download CRX files and save them for unpacking.
     """
 
-    def __init__(self, jobs, results, save_path, stats_queue):
+    def __init__(self, jobs, results, save_path, stats_queue, database_metadata, backup_queue):
+        """
+        Download extensions to the save path.
+
+        :param jobs: The queue with the extension IDs to download.
+        :type jobs: queue.Queue
+        :param results: The queue for downloaded CRXs.
+        :type results: queue.Queue
+        :param save_path: Directory where the CRX files should be downloaded to.
+        :type save_path: str
+        :param stats_queue: The queue for statistics collecting.
+        :type stats_queue: queue.Queue
+        :param database_metadata: A metadata object bound to an instantiated
+            engine.
+        :type database_metadata: MetaData
+        :param backup_queue: The queue for backing up the progress of all the
+            DownloadWorker threads.
+        :type backup_queue: queue.Queue
+        :return:
+        """
         super().__init__(jobs, results)
         self.save_path = save_path
         self.stats = stats_queue
+        self.extension = Table('extension', database_metadata)
+        # Open connection to the database
+        self.db_conn = database_metadata.bind.connect()
+        self.backup = backup_queue
 
     # @profile  # For memory profiling
     def do_job(self, crx_id):
@@ -588,14 +644,20 @@ class DownloadWorker(_MyWorker):
                 # TODO: Update the database. Mark this extension as invalid.
                 self.stats.put('-Invalid extension ID: No 301 status when expected')
                 return
+        dt_avail = datetime.today()
 
         # Download the CRX file, put the full save path on the results queue
         try:
-            crx_path = download(crx_id, self.save_path)
+            resp = _get_resp_obj(crx_id)
+            self._check_duplicate_version(resp, crx_id, dt_avail)
+            crx_path = download(crx_id, self.save_path, resp)
         except FileExistsError as err:
             # This should only happen if the versions match. Unfortunately, we can't assume the other version
             # completed successfully, so we need to extract the crx_path from the error message.
             crx_path = err.filename
+            crx_version = get_crx_version(crx_path)
+            # The package still needs to be profiled
+            self.results.put((crx_id, crx_version, crx_path, dt_avail))
             self.stats.put('+CRX download completed, but overwrote previously downloaded file')
         except FileNotFoundError:
             # Probably couldn't properly save the file because of some weird characters in the path we tried
@@ -622,13 +684,33 @@ class DownloadWorker(_MyWorker):
             del fout
             self.stats.put('-Got HTTPError error when downloading')
             return
+        except DuplicateDownload:
+            # We've already updated the database, so there's nothing else to do here but close the connection
+            pass
         except:
             raise
         else:
             self.stats.put('+CRX download complete, fresh file saved')
-        crx_version = get_crx_version(crx_path)
-        self.results.put((crx_id, crx_version, crx_path, datetime.today()))
-        self.log_it('Download', crx_id)
+            crx_version = get_crx_version(crx_path)
+            # The package still needs to be profiled
+            self.results.put((crx_id, crx_version, crx_path, dt_avail))
+
+        self.backup.put(crx_id)
+
+    def _check_duplicate_version(self, resp_obj, crx_id, dt_avail):
+        crx_version = get_crx_version(resp_obj.url.rsplit('extension', 1)[-1])
+        # If we already have this version in the database, update the last known available datetime
+        s = select([self.extension]).where(and_(self.extension.c.ext_id == crx_id,
+                                                self.extension.c.version == crx_version))
+        row = self.db_conn.execute(s).fetchone()
+        if row:
+            with self.db_conn.begin():
+                update(self.extension).where(and_(self.extension.c.ext_id == crx_id,
+                                                  self.extension.c.version == crx_version)).\
+                    values(last_known_available=dt_avail)
+            self.stats.put('|Updated an existing extension entry in the DB before unpacking')
+            resp_obj.close()  # The Response object must not be accessed after this call
+            raise DuplicateDownload
 
 
 class UnpackWorker(_MyWorker):
@@ -700,16 +782,14 @@ class CentroidWorker(_MyWorker):
 
 class DatabaseWorker(_MyWorker):
 
-    def __init__(self, centroids, database_metadata, backup_file, stats_queue):
+    def __init__(self, centroids, database_metadata, stats_queue):
         """
 
         :param centroids: The queue of computed centroids.
         :type centroids: queue.Queue
         :param database_metadata: A metadata object bound to an instantiated
-                                  engine.
+            engine.
         :type database_metadata: MetaData
-        :param backup_file: The file to use for backing up progress.
-        :type backup_file: str
         :param stats_queue: Queue for keeping track of run statistics.
         :type stats_queue: queue.Queue
         :return:
@@ -721,39 +801,9 @@ class DatabaseWorker(_MyWorker):
         # Open connection to the database
         self.db_conn = database_metadata.bind.connect()
 
-        # Store count of jobs completed so we know when to back up our progress
-        self.count = 0
-        self.backup_file = backup_file
-
     def leave(self):
         # Close the connection to the database
         self.db_conn.close()
-
-    def _backup_progress(self, crx_id):
-        """
-        Using the given ID, store a 2-character starting point in the backup
-        file. For example, if crx_id starts with "ca...", the stored string
-        will be "bz" to ensure no gap between what is done and where the
-        program picks up again later.
-
-        :param crx_id: The ID of an extension that has been successfully added
-                       added to the database.
-        :type crx_id: str
-        :return: None
-        :rtype: None
-        """
-        if crx_id[1] == 'a':
-            if crx_id[0] == 'a':
-                bak = 'aa'
-            else:
-                bak = ascii_lowercase[ascii_lowercase.index(crx_id[0])-1] + 'z'
-        else:
-            bak = crx_id[0] + ascii_lowercase[ascii_lowercase.index(crx_id[1])-1]
-
-        with open(self.backup_file, 'w') as fout:
-            fout.write(bak)
-
-        del crx_id, bak, fout
 
     # @profile  # For memory profiling
     def do_job(self, job):
@@ -778,15 +828,7 @@ class DatabaseWorker(_MyWorker):
                 self.db_conn.execute(self.extension.insert().values(cent_vals))
             self.stats.put('+Successfully added a new extension entry in the DB')
 
-        self.count += 1
-        if not self.count % 1000:
-            self._backup_progress(crx_id)
-
-        # Only log every 100 successful entries at a higher logging level
-        if not self.count % 100:
-            self.log_it('Database entry', crx_id, logging.INFO)
-        else:
-            self.log_it('Database entry', crx_id, logging.DEBUG)
+        self.log_it('Database entry', crx_id)
 
         # Try and conserve memory usage
         del cent_vals, crx_id, crx_version, row
@@ -830,6 +872,50 @@ class StatsProcessor(_MyWorker):
 
     def leave(self):
         self._log_stat(use_timestamp=True)
+
+
+class BackupWorker(_MyWorker):
+
+    def __init__(self, backup_queue, backup_file):
+        super().__init__(backup_queue, None)
+        # Store count of jobs completed so we know when to back up our progress
+        self.backup_file = backup_file
+        self.count = 0
+
+    def _backup_progress(self, crx_id):
+        """
+        Using the given ID, store a 2-character starting point in the backup
+        file. For example, if crx_id starts with "ca...", the stored string
+        will be "bz" to ensure no gap between what is done and where the
+        program picks up again later.
+
+        :param crx_id: The ID of an extension that has been successfully
+            downloaded (or skipped because it was already downloaded).
+        :type crx_id: str
+        :return: None
+        :rtype: None
+        """
+        if crx_id[1] == 'a':
+            if crx_id[0] == 'a':
+                bak = 'aa'
+            else:
+                bak = ascii_lowercase[ascii_lowercase.index(crx_id[0])-1] + 'z'
+        else:
+            bak = crx_id[0] + ascii_lowercase[ascii_lowercase.index(crx_id[1])-1]
+
+        with open(self.backup_file, 'w') as fout:
+            fout.write(bak)
+
+        del crx_id, bak, fout
+
+    def do_job(self, job):
+        self.count += 1
+        # Only log every 500 successful entries at a higher logging level
+        if not self.count % 500:
+            self._backup_progress(job)
+            self.log_it('Download', job, logging.INFO)
+        else:
+            self.log_it('Download', job, logging.DEBUG)
 
 
 if __name__ == '__main__':
