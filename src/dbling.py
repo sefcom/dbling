@@ -20,6 +20,7 @@ import requests
 import sqlite3
 import subprocess
 from time import sleep, time
+from util import add_color_log_levels
 
 TEST = True
 MANUAL = True
@@ -119,6 +120,7 @@ class Dbling(object):
             fout.write((' --  '*15)+'\n')
         log_format = '%(asctime)s %(levelname) 8s -- %(message)s'
         logging.basicConfig(filename=self._log_path, level=logging.INFO, format=log_format)
+        add_color_log_levels(center=True)
         logging.info('dbling instance up and initializing.')
 
         self._devs = get_current_devs()

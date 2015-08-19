@@ -48,7 +48,7 @@ from string import ascii_lowercase
 import threading
 from time import sleep
 from unpack import unpack
-from util import verify_crx_availability
+from util import verify_crx_availability, add_color_log_levels
 from zipfile import BadZipFile
 
 # Make 'requests' library only log things if they're at least a warning
@@ -939,6 +939,7 @@ if __name__ == '__main__':
     assert args['--log'] in ('CRITICAL', 'ERROR', 'WARNING', 'INFO', 'DEBUG', 'NOTSET')
     log_level = getattr(logging, args['--log'])
     logging.basicConfig(filename=_log_path, level=log_level, format=log_format)
+    add_color_log_levels(center=True)
 
     # Get the configuration
     with open(path.join(DBLING_DIR, 'src', 'crx_conf.json')) as _fin:
