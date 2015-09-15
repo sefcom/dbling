@@ -1,0 +1,15 @@
+{
+  "NOTE": [
+    "Please do NOT add new dependencies into this file. Contact ",
+    "aiolos@, dtu@, or nednguyen@ on how to proceed with your change."
+  ],
+  "directory_deps": [
+    "build/android/pylib/",
+    "third_party/catapult/",
+    "third_party/ply/",
+    "third_party/webpagereplay/",
+    "tools/telemetry/"
+  ],
+  "file_deps": [
+  ]
+}
