@@ -41,6 +41,7 @@ import os
 from os import path
 import queue
 import requests
+from requests.exceptions import ChunkedEncodingError
 from sqlalchemy import MetaData, Table, select, and_, update
 from sqlalchemy.exc import IntegrityError
 import stat
@@ -323,7 +324,19 @@ def _set_vertex_props(digraph, vertex, filename):
 def _update_crx_list(ext_url, show_progress=False):
     # Download the list of extensions
     logging.info('Downloading list of extensions.')
-    resp = requests.get(ext_url)
+    resp = None
+    for i in range(5):
+        try:
+            resp = requests.get(ext_url)
+        except ChunkedEncodingError:
+            sleep(10 * (i+1))
+            pass
+        else:
+            break
+    if resp is None:
+        logging.critical('Failed to download list of extensions. Centroid calculation may use an old list.')
+        return
+
     resp.raise_for_status()  # If there was an HTTP error, raise it
 
     # Get database handles
