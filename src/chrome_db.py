@@ -4,12 +4,13 @@ Initialize the database by ensuring the engine is instantiated and the
 'extension' table has been created with the proper columns.
 """
 
-__all__ = ['DB_ENGINE', 'DB_META', 'USED_TO_DB']
-
 import json
 from os import path
+
 from sqlalchemy import create_engine, engine_from_config, MetaData, Table, Column, Integer, String, DateTime, Float, \
-    Index
+    Index, ForeignKey
+
+__all__ = ['DB_ENGINE', 'DB_META', 'USED_TO_DB']
 
 with open(path.abspath(path.join(path.dirname(path.realpath(__file__)), 'crx_conf.json'))) as fin:
     db_conf = json.load(fin)['db']
@@ -54,7 +55,7 @@ extension = Table('extension', DB_META,
                   Column('perms', Float),
                   Column('depth', Float),
                   Column('type', Float),
-                  Column('centroid_group', Integer),
+                  Column('centroid_group', Integer, ForeignKey("centroid_family.pk")),
 
                   # Image centroid fields, calculated after installing
                   Column('i_size', Float),
@@ -64,7 +65,7 @@ extension = Table('extension', DB_META,
                   Column('i_perms', Float),
                   Column('i_depth', Float),
                   Column('i_type', Float),
-                  Column('i_centroid_group', Integer),
+                  Column('i_centroid_group', Integer, ForeignKey("centroid_family.pk")),
 
                   # Unique index on the extension ID and version
                   Index('idx_id_ver', 'ext_id', 'version', unique=True)
@@ -76,3 +77,27 @@ id_list = Table('id_list', DB_META,
                 Column('ext_id', String(32), primary_key=True)
                 )
 id_list.create(checkfirst=True)
+
+# Create the centroid_family table
+cent_fam = Table('centroid_family', DB_META,
+                 Column('pk', Integer, primary_key=True),
+
+                 # Centroid fields
+                 Column('size', Float),
+                 Column('ctime', Float),
+                 Column('num_dirs', Float),
+                 Column('num_files', Float),
+                 Column('perms', Float),
+                 Column('depth', Float),
+                 Column('type', Float),
+                 Column('centroid_group', Integer),
+
+                 # Stats
+                 Column('num_members', Integer),  # Number of rows from 'extension' matching this centroid
+                 Column('members_updated', DateTime(True)),
+                 Column('num_i_members', Integer),  # Number of rows whose i_centroid_group matches this record
+                 Column('i_members_updated', DateTime(True)),
+                 Column('distinct_id_members', Integer),  # Number of members w/distinct IDs
+                 Column('distinct_members_updated', DateTime(True)),
+                 )
+cent_fam.create(checkfirst=True)
