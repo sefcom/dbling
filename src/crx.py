@@ -591,6 +591,45 @@ def get_crx_version(crx_path):
     return ver_str.replace('_', '.')
 
 
+class ExtensionEntry:
+    def __init__(self, crx_id=None, crx_version=None, crx_path=None, dt_avail=None):
+        self.crx_id = crx_id
+        self.crx_version = crx_version
+        self.crx_path = crx_path
+        self.dt_avail = dt_avail
+        self._path = None
+        self._centroid_vals = None
+
+    @property
+    def extracted_path(self):
+        if self._path is None:
+            return ''
+        return self._path
+
+    @extracted_path.setter
+    def extracted_path(self, val):
+        assert isinstance(val, str)
+        if self._path is not None:
+            # Only set the value once
+            return
+        self._path = val
+
+    @property
+    def cent_dict(self):
+        if self._centroid_vals is None:
+            return {}
+        return self._centroid_vals
+
+    @cent_dict.setter
+    def cent_dict(self, val):
+        assert isinstance(val, dict)
+        # assert len(dict)
+        if self._centroid_vals is not None:
+            # Only set the value once
+            return
+        self._centroid_vals = val
+
+
 class _MyWorker(threading.Thread):
 
     def __init__(self, jobs, results):
@@ -689,6 +728,8 @@ class DownloadWorker(_MyWorker):
         on the results queue. Skip extensions (version must match) that we've
         already downloaded before.
 
+        :param crx_id: The extension ID to download.
+        :type crx_id: str
         :return: None
         :rtype: None
         """
@@ -719,7 +760,7 @@ class DownloadWorker(_MyWorker):
             crx_path = err.filename
             crx_version = get_crx_version(crx_path)
             # The package still needs to be profiled
-            self.results.put((crx_id, crx_version, crx_path, dt_avail))
+            self.results.put(ExtensionEntry(crx_id, crx_version, crx_path, dt_avail))
             self.stats.put('+CRX download completed, but overwrote previously downloaded file')
         except FileNotFoundError:
             # Probably couldn't properly save the file because of some weird characters in the path we tried
@@ -755,7 +796,7 @@ class DownloadWorker(_MyWorker):
             self.stats.put('+CRX download complete, fresh file saved')
             crx_version = get_crx_version(crx_path)
             # The package still needs to be profiled
-            self.results.put((crx_id, crx_version, crx_path, dt_avail))
+            self.results.put(ExtensionEntry(crx_id, crx_version, crx_path, dt_avail))
 
         self.backup.put(crx_id)
 
@@ -784,38 +825,46 @@ class UnpackWorker(_MyWorker):
 
     # @profile  # For memory profiling
     def do_job(self, job):
-        crx_id, crx_version, crx_path, dt_avail = job
-        extracted_path = path.join(self.ex_path, crx_id, crx_version)
+        """
+        Unpack the CRX.
+
+        :param job: The extension to work on.
+        :type job: ExtensionEntry
+        :return: None
+        :rtype: None
+        """
+        extracted_path = path.join(self.ex_path, job.crx_id, job.crx_version)
         try:
-            unpack(crx_path, extracted_path, overwrite_if_exists=True)
+            unpack(job.crx_path, extracted_path, overwrite_if_exists=True)
         except FileExistsError:
             # No need to get the path from the error since we already know the extracted path
             self.stats.put('|Failed to overwrite an existing Zip file, but didn\'t crash')
         except BadZipFile:
-            logging.warning('%s  Failed to unzip file because it isn\'t valid.' % crx_id)
+            logging.warning('%s  Failed to unzip file because it isn\'t valid.' % job.crx_id)
             with open(path.join(DBLING_DIR, 'src', 'failed_downloads.txt'), 'a') as fout:
-                fout.write(crx_id + '\n')
+                fout.write(job.crx_id + '\n')
             del fout
             self.stats.put('-Zip file failed validation')
             return
         except MemoryError:
-            logging.warning('%s  Failed to unzip file because of a memory error.' % crx_id)
+            logging.warning('%s  Failed to unzip file because of a memory error.' % job.crx_id)
             with open(path.join(DBLING_DIR, 'src', 'failed_downloads.txt'), 'a') as fout:
-                fout.write(crx_id + '\n')
+                fout.write(job.crx_id + '\n')
             del fout
             self.stats.put('-Unpacking Zip file failed due do a MemoryError')
             return
         except (IndexError, IsADirectoryError):
-            logging.warning('%s  Failed to unzip file likely because of a member filename error.' % crx_id, exc_info=1)
+            logging.warning('%s  Failed to unzip file likely because of a member filename error.' % job.crx_id, exc_info=1)
             with open(path.join(DBLING_DIR, 'src', 'failed_downloads.txt'), 'a') as fout:
-                fout.write(crx_id + '\n')
+                fout.write(job.crx_id + '\n')
             del fout
             self.stats.put('-Other error while unzipping file')
             return
         else:
             self.stats.put('+Unpacked a Zip file')
-        self.results.put((crx_id, crx_version, extracted_path, dt_avail))
-        self.log_it('Unpack', crx_id)
+        job.extracted_path = extracted_path
+        self.results.put(job)
+        self.log_it('Unpack', job.crx_id)
 
 
 class CentroidWorker(_MyWorker):
@@ -826,9 +875,16 @@ class CentroidWorker(_MyWorker):
 
     # @profile  # For memory profiling
     def do_job(self, job):
-        crx_id, crx_version, ext_path, dt_avail = job
+        """
+        Calculate the centroid for the extension.
+
+        :param job: The extension to work on.
+        :type job: ExtensionEntry
+        :return: None
+        :rtype: None
+        """
         # Generate graph from directory and centroid from the graph
-        dir_graph = make_graph_from_dir(ext_path)
+        dir_graph = make_graph_from_dir(job.extracted_path)
         cent_vals = calc_centroid(dir_graph)
         # Try to conserve memory usage
         del dir_graph
@@ -837,9 +893,10 @@ class CentroidWorker(_MyWorker):
         cent_dict = {}
         for k, v in zip((USED_FIELDS + ('_c_size',)), cent_vals):
             cent_dict[USED_TO_DB[k]] = v
-        self.results.put((crx_id, crx_version, cent_dict, dt_avail))
+        job.cent_dict = cent_dict
+        self.results.put(job)
         self.stats.put('+Centroids calculated')
-        self.log_it('Centroid calculation', crx_id)
+        self.log_it('Centroid calculation', job.crx_id)
 
 
 class DatabaseWorker(_MyWorker):
@@ -869,31 +926,38 @@ class DatabaseWorker(_MyWorker):
 
     # @profile  # For memory profiling
     def do_job(self, job):
-        crx_id, crx_version, cent_vals, dt_avail = job
+        """
+        Add the database entry for the extension.
+
+        :param job: The extension to work on.
+        :type job: ExtensionEntry
+        :return: None
+        :rtype: None
+        """
         # If we already have this version in the database, update the last known available datetime
-        s = select([self.extension]).where(and_(self.extension.c.ext_id == crx_id,
-                                                self.extension.c.version == crx_version))
+        s = select([self.extension]).where(and_(self.extension.c.ext_id == job.crx_id,
+                                                self.extension.c.version == job.crx_version))
         row = self.db_conn.execute(s).fetchone()
         if row:
             with self.db_conn.begin():
-                update(self.extension).where(and_(self.extension.c.ext_id == crx_id,
-                                                  self.extension.c.version == crx_version)).\
-                    values(last_known_available=dt_avail)
+                update(self.extension).where(and_(self.extension.c.ext_id == job.crx_id,
+                                                  self.extension.c.version == job.crx_version)).\
+                    values(last_known_available=job.dt_avail)
             self.stats.put('|Updated an existing extension entry in the DB')
         else:
             # Add entry to the database
-            cent_vals['ext_id'] = crx_id
-            cent_vals['version'] = crx_version
-            cent_vals['profiled'] = datetime.today()
-            cent_vals['last_known_available'] = dt_avail
+            job.cent_dict['ext_id'] = job.crx_id
+            job.cent_dict['version'] = job.crx_version
+            job.cent_dict['profiled'] = datetime.today()
+            job.cent_dict['last_known_available'] = job.dt_avail
             with self.db_conn.begin():
-                self.db_conn.execute(self.extension.insert().values(cent_vals))
+                self.db_conn.execute(self.extension.insert().values(job.cent_dict))
             self.stats.put('+Successfully added a new extension entry in the DB')
 
-        self.log_it('Database entry', crx_id)
+        self.log_it('Database entry', job.crx_id)
 
         # Try and conserve memory usage
-        del cent_vals, crx_id, crx_version, row
+        del job, row
 
 
 class StatsProcessor(_MyWorker):
