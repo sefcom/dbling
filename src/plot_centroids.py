@@ -9,10 +9,14 @@ import json
 
 import plotly.plotly as py
 from docopt import docopt
+from plotly import offline as pyoff
 from plotly.graph_objs import Scatter, Marker, Data, Histogram
 from sqlalchemy import select, Table
 
 from centroid import centroid_difference, get_normalizing_vector, USED_FIELDS, USED_TO_DB, DB_META
+
+
+OFFLINE = True
 
 
 class Plotter:
@@ -75,8 +79,11 @@ class Plotter:
         )
 
         data = Data([trace])
-        plot_url = py.plot(data, filename="centroid-distances-normalized")
-        print("Plot ready at: %s" % plot_url)
+        if OFFLINE:
+            pyoff.plot(data)
+        else:
+            plot_url = py.plot(data, filename="centroid-distances-normalized")
+            print("Plot ready at: %s" % plot_url)
 
     def hist(self):
         ids_calculated = []
@@ -116,8 +123,11 @@ class Plotter:
 
         # Create the histogram
         data = Data([Histogram(x=centroid_counts)])
-        plot_url = py.plot(data, filename="centroid-cluster-histogram")
-        print("Plot ready at: %s" % plot_url)
+        if OFFLINE:
+            pyoff.plot(data)
+        else:
+            plot_url = py.plot(data, filename="centroid-cluster-histogram")
+            print("Plot ready at: %s" % plot_url)
 
 
 if __name__ == '__main__':
