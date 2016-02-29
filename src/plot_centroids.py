@@ -5,13 +5,14 @@ Usage: plot_centroids.py [FUNCTION]
 FUNCTION can be one of: diff1, hist, (more coming soon)
 """
 
-from centroid import USED_FIELDS, centroid_difference
-from crx import _init_db, USED_TO_DB
-from docopt import docopt
 import json
+
 import plotly.plotly as py
+from docopt import docopt
 from plotly.graph_objs import Scatter, Marker, Data, Histogram
 from sqlalchemy import select, Table
+
+from centroid import centroid_difference, get_normalizing_vector, USED_FIELDS, USED_TO_DB, DB_META
 
 
 class Plotter:
@@ -21,22 +22,13 @@ class Plotter:
         with open('crx_conf.json') as fin:
             db_conf = json.load(fin)['db']
 
-        self.db_meta = _init_db(db_conf)
+        self.db_meta = DB_META
         self.db_conn = self.db_meta.bind.connect()
         self.extension = Table('extension', self.db_meta)
         self.all_fields = USED_FIELDS + ('_c_size',)
 
-        norm_dict = dict.fromkeys(self.all_fields, float('-inf'))
-        self.norm_tup = ()
-
         # Get normalizing values
-        for row in self.db_conn.execute(select([self.extension])):
-            for field in self.all_fields:
-                col = getattr(self.extension.c, USED_TO_DB[field])
-                if row[col] > norm_dict[field]:
-                    norm_dict[field] = row[col]
-        for field in self.all_fields:
-            self.norm_tup += (norm_dict[field],)
+        self.norm_tup = get_normalizing_vector(self.db_meta)
 
         self.quit = lambda: None
         self.q = lambda: None

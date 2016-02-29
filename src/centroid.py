@@ -1,16 +1,19 @@
-
+import logging
 from copy import deepcopy as copy
 from datetime import datetime, timezone
-import graph_tool.all as gt
-import logging
 from math import ceil, sqrt
 
+import graph_tool.all as gt
+from sqlalchemy import Table, select
 
-USED_FIELDS = ('_c_ctime', '_c_num_child_dirs', '_c_num_child_files', '_c_mode', '_c_depth', '_c_type')
+from chrome_db import DB_META, USED_TO_DB
+
+# USED_FIELDS = ('_c_ctime', '_c_num_child_dirs', '_c_num_child_files', '_c_mode', '_c_depth', '_c_type')
+USED_FIELDS = ('_c_num_child_dirs', '_c_num_child_files', '_c_mode', '_c_depth', '_c_type')
 ISO_TIME = '%Y-%m-%dT%H:%M:%SZ'
 
-__all__ = ['calc_centroid', 'centroid_difference', 'InvalidCentroidError', 'InvalidTreeError', 'ISO_TIME',
-           'USED_FIELDS']
+__all__ = ['calc_centroid', 'centroid_difference', 'get_normalizing_vector', 'InvalidCentroidError', 'InvalidTreeError',
+           'ISO_TIME', 'USED_FIELDS']
 
 
 class InvalidTreeError(Exception):
@@ -81,7 +84,8 @@ class CentroidCalc(object):
         self.digr.vp['_c_type'] = self.digr.new_vertex_property('int')
 
         self.block_size = block_size
-        self.top = self._get_tree_top()
+        self.top = get_tree_top(self.digr)
+        self._cent_calculated = False
         logging.debug('Created CentroidCalc object with %d vertices.' % self.digr.num_vertices())
 
     def do_calc(self):
@@ -113,8 +117,10 @@ class CentroidCalc(object):
 
         for s in ('t', 'u', 'v', 'x', 'y', 'z')[:len(USED_FIELDS)]:
             self.digr.gp['centroid'].append(sums[s]/sums['w'])
-        # Add the size property
+        # Add the size and ttl_files properties
         self.digr.gp['centroid'].append(sums['w'])
+        self.digr.gp['centroid'].append(self.size)  # Corresponds to the number of files, or ttl_files
+        self._cent_calculated = True
 
     def _set_properties(self, vertex, depth, baseline_time=None):
         """
@@ -162,7 +168,7 @@ class CentroidCalc(object):
         self.digr.vp['_c_num_child_files'][vertex] = num_child_files
 
         # Size
-        size = int(self.digr.vp['size'][vertex])  # Get original size first
+        size = int(self.digr.vp['filesize'][vertex])  # Get original size first
         size = int(ceil(size / self.block_size))  # How many blocks does it occupy?
         self.digr.vp['_c_size'][vertex] = size
 
@@ -170,7 +176,8 @@ class CentroidCalc(object):
         try:
             perms = int(self.digr.vp['mode'][vertex])
         except ValueError:
-            logging.critical('Encountered a vertex with an invalid value for mode, couldn\'t convert to int.')
+            logging.critical('Encountered a vertex with an invalid value for mode, couldn\'t convert to int: %s' %
+                             self.digr.vp['mode'][vertex])
             raise InvalidTreeError('All vertices in the tree must have a valid mode value.')
         self.digr.vp['_c_mode'][vertex] = perms
 
@@ -180,43 +187,52 @@ class CentroidCalc(object):
         # Type
         self.digr.vp['_c_type'][vertex] = int(self.digr.vp['type'][vertex][0])
 
-    def _get_tree_top(self):
-        """
-        Traverse the self.digr subtree and return the top-most vertex.
-
-        :return: The top-most vertex in the graph.
-        :rtype: graph_tool.Vertex
-        """
-        _v = None
-        for _v in self.digr.vertices():
-            break
-
-        # Validate the starting vertex
-        if _v is None:
-            logging.critical('Tree has no vertices, cannot calculate centroid.')
-            raise InvalidTreeError('Given subtree has no vertices.')
-
-        # Find the top-most vertex
-        while True:
-            # Each vertex should have exactly 1 incoming edge
-            if _v.in_degree() > 1:
-                logging.critical('Graph is not a valid tree, found vertex with >1 parent.')
-                raise InvalidTreeError('Given subtree has vertices with >1 parent.')
-
-            elif _v.in_degree() == 0:
-                # If a vertex has no incoming edges, it must be the top
-                return _v
-
-            else:
-                _v = list(_v.in_neighbours())[0]
-
     @property
     def centroid(self):
+        if not self._cent_calculated:
+            self.do_calc()
         return tuple(self.digr.gp['centroid'])
 
     @property
     def graph(self):
         return self.digr.copy()
+
+    @property
+    def size(self):
+        return self.digr.num_vertices()
+
+
+def get_tree_top(digr):
+    """
+    Traverse the subtree at digr and return the top-most vertex.
+
+    :param digr: Some graph object.
+    :type digr: graph_tool.Graph
+    :return: The top-most vertex in the graph.
+    :rtype: graph_tool.Vertex
+    """
+    _v = None
+    for _v in digr.vertices():
+        break
+
+    # Validate the starting vertex
+    if _v is None:
+        logging.critical('Tree has no vertices, cannot calculate centroid.')
+        raise InvalidTreeError('Given subtree has no vertices.')
+
+    # Find the top-most vertex
+    while True:
+        # Each vertex should have exactly 1 incoming edge
+        if _v.in_degree() > 1:
+            logging.critical('Graph is not a valid tree, found vertex with >1 parent.')
+            raise InvalidTreeError('Given subtree has vertices with >1 parent.')
+
+        elif _v.in_degree() == 0:
+            # If a vertex has no incoming edges, it must be the top
+            return _v
+
+        else:
+            _v = list(_v.in_neighbours())[0]
 
 
 def calc_centroid(sub_tree):
@@ -255,18 +271,28 @@ def centroid_difference(centroid1, centroid2, normalize=None):
     :return: The magnitude of the vector difference.
     :rtype: float
     """
-    if len(centroid1) != len(centroid2) or len(centroid1) != (len(USED_FIELDS) + 1):
-        logging.critical('Cannot calculate centroid difference for vectors with invalid lengths.')
-        raise InvalidCentroidError('Both centroid vectors must have length %d' % (len(USED_FIELDS) + 1))
-    if normalize is not None and len(normalize) != (len(USED_FIELDS) + 1):
+    l1 = len(centroid1)
+    l2 = len(centroid2)
+    lu = len(USED_FIELDS) + 2
+    if l1 != l2 or l1 != lu:
+        logging.critical('Cannot calculate centroid difference for vectors with invalid lengths. (%d and %d, should be '
+                         '%d)' % (l1, l2, lu))
+        print(centroid1)
+        print(centroid2)
+        raise InvalidCentroidError('Both centroid vectors must have length %d' % lu)
+    if normalize is not None and len(normalize) != lu:
         logging.critical('Cannot calculate centroid difference using a normalizing vectors with an invalid length.')
-        raise InvalidCentroidError('Normalizing centroid vector must have length %d' % (len(USED_FIELDS) + 1))
+        raise InvalidCentroidError('Normalizing centroid vector must have length %d' % lu)
 
     diff = []
 
     # Non-normalized difference
     if normalize is None:
-        normalize = [1] * (len(USED_FIELDS) + 1)
+        normalize = [1] * lu
+
+    # Make sure the ttl_files field of the normalizing vector is 1
+    if normalize[-1] != 1:
+        normalize = normalize[:-1] + (1,)
 
     for i, j, n in zip(centroid1, centroid2, normalize):
         diff.append((i / n) - (j / n))
@@ -275,3 +301,31 @@ def centroid_difference(centroid1, centroid2, normalize=None):
     for k in diff:
         magnitude += k**2
     return sqrt(magnitude)
+
+
+def get_normalizing_vector(db_meta=DB_META):
+    """
+    Return the normalizing vector for centroids in the database.
+
+    :param db_meta: The meta object to access the DB.
+    :type db_meta: sqlalchemy.MetaData
+    :return: The current normalizing vector for the DB.
+    :rtype: tuple
+    """
+    db_conn = db_meta.bind.connect()
+    extension = Table('extension', db_meta)
+
+    all_fields = USED_FIELDS + ('_c_size',)
+    norm_dict = dict.fromkeys(all_fields, float('-inf'))
+    norm_tup = tuple()
+
+    for row in db_conn.execute(select([extension])):
+        for field in all_fields:
+            col = getattr(extension.c, USED_TO_DB[field])
+            if row[col] > norm_dict[field]:
+                norm_dict[field] = row[col]
+    for field in all_fields:
+        norm_tup += (norm_dict[field],)
+
+    db_conn.close()
+    return norm_tup + (1,)

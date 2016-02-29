@@ -9,16 +9,22 @@ Options:
 
 """
 
-import clr
-from docopt import docopt
-import graph_tool.all as gt
-from hashlib import sha256
 import json
 import logging
-from lxml import etree
 import os
-from os import path
 import re
+from hashlib import sha256
+from os import path
+
+import graph_tool.all as gt
+from docopt import docopt
+from lxml import etree
+
+from centroid import get_tree_top
+import clr
+from const import *
+import crx
+from crx import make_graph_from_dir
 import util
 
 
@@ -27,11 +33,8 @@ DIRECTORY = 2
 DT_DIR = 4
 DT_REG = 8
 MAX_FILES = 2
-MIN_DEPTH = -1
 
-EVAL_NONE = 2
-EVAL_TRUE = 1
-EVAL_FALSE = 0
+KNOWN_EXT_DIR = None
 
 INODE_ONLY = False
 HASH_LABEL = True
@@ -78,11 +81,13 @@ class _GraphDiff(object):
         self.type_count = {}
         self.home_vertex = None
         self.dupl_file = dupl_file
+        self._filter_depth = False
         self.gi = {}  # graph indexes: maps vertex "labels" to vertex objects
 
         # Create the internal property maps
         self.digr.vp['inode'] = self.digr.new_vertex_property('int')
         self.digr.vp['parent_inode'] = self.digr.new_vertex_property('int')
+        self.digr.vp['filename'] = self.digr.new_vertex_property('string')
         self.digr.vp['filename_id'] = self.digr.new_vertex_property('string')
         self.digr.vp['filename_end'] = self.digr.new_vertex_property('string')
         self.digr.vp['name_type'] = self.digr.new_vertex_property('string')
@@ -105,8 +110,10 @@ class _GraphDiff(object):
         self.digr.vp['crtime'] = self.digr.new_vertex_property('string')
         self.digr.vp['color'] = self.digr.new_vertex_property('vector<float>')
         self.digr.vp['shape'] = self.digr.new_vertex_property('string')
+        self.digr.vp['graph_size'] = self.digr.new_vertex_property('int', val=5)
         self.digr.vp['dir_depth'] = self.digr.new_vertex_property('short')
         self.digr.vp['gt_min_depth'] = self.digr.new_vertex_property('bool')
+        self.digr.vp['keeper'] = self.digr.new_vertex_property('bool', val=True)
 
         # Set the "label" for vertices
         if INODE_ONLY:
@@ -117,6 +124,12 @@ class _GraphDiff(object):
         # Queue for removing vertices
         self._to_remove = []
 
+        # Regular expressions for filtering files
+        self.ex_pat_dot = re.compile('/\.\.?$')
+        self.ex_pat_shadow = re.compile('^/?home/\.shadow/(.+)')
+        self.in_pat_home = re.compile('^/?home$')
+        self.in_pat_shadow = re.compile('^/?home/\.shadow$')
+
     def deinit(self, clean=True, dup=False):
         if clean:
             logging.info('Execution completed cleanly. Shutting down.')
@@ -126,25 +139,37 @@ class _GraphDiff(object):
             logging.warning('Unclean shutdown. Did not finish processing the diffs.')
         logging.shutdown()  # Flush and close all handlers
 
-    def show_graph(self):
+    def graph_copy(self):
+        """
+        Return a copy of the graph object.
+
+        :return: A copy of the graph.
+        :rtype: graph_tool.Graph
+        """
+        return self.digr.copy()
+
+    def show_graph(self, digr=None):
         # TODO: If this needs to support more than MAX_FILES==3, rewrite this
+        if digr is None:
+            digr = self.digr
+
         num_drawn = 0.0  # To get floating point answer when dividing later
         next_logged = 0.25
-        for vertex in self.digr.vertices():
+        for vertex in digr.vertices():
             # Reset variables, just in case
             color = shape = None
 
             # How many files was this a part of?
-            if len(self.digr.vp["src_files"][vertex]) >= 2:
+            if len(digr.vp["src_files"][vertex]) >= 2:
                 color = [0.502, 0., 0.502, 0.9]  # 'purple'
-            elif 1 in self.digr.vp["src_files"][vertex]:
+            elif 1 in digr.vp["src_files"][vertex] or not len(digr.vp["src_files"][vertex]):
                 color = [0.640625, 0, 0, 0.9]  # 'r'  # Red
-            elif 2 in self.digr.vp["src_files"][vertex]:
+            elif 2 in digr.vp["src_files"][vertex]:
                 color = [0, 0, 0.640625, 0.9]  # 'b'  # Blue
 
             # File, directory, or other? Was it encrypted or not?
-            enc = self.digr.vp['encrypted'][vertex]
-            for t in self.digr.vp['type'][vertex]:
+            enc = digr.vp['encrypted'][vertex]
+            for t in digr.vp['type'][vertex]:
                 # May redraw the same node multiple times, but that's better than losing data in the graph # TODO: Not true anymore
                 if t == FILE:
                     if enc:
@@ -161,15 +186,27 @@ class _GraphDiff(object):
                     # Unknown file types
                     color = [0, 0.749, 0.749, 0.9]  # Cyan
                     shape = 'square'
+                break
 
-            self.digr.vp['color'][vertex] = color
-            self.digr.vp['shape'][vertex] = shape
+            if not len(digr.vp['color'][vertex]):  # Only set color if we didn't already set it
+                # import pdb; pdb.set_trace()
+                digr.vp['color'][vertex] = color
+            digr.vp['shape'][vertex] = shape
+
+            if digr.vp['inode'][vertex] == KNOWN_EXT_DIR:
+                digr.vp['color'][vertex] = [0.8, 0, 0.8, 0.9]
+                digr.vp['graph_size'][vertex] = 10
+            else:
+                digr.vp['graph_size'][vertex] = 5
+
+            if not digr.vp['keeper'][vertex]:
+                digr.vp['color'][vertex] = [0, 0, 0, 0.8]
 
             # Log progress
             num_drawn += 1
-            if (num_drawn/self.digr.num_vertices()) >= next_logged:
+            if (num_drawn/digr.num_vertices()) >= next_logged:
                 per = str(int(next_logged*100)) + '%'
-                logging.debug('Drawn %s of the nodes in the graph (%d/%d)' % (per, num_drawn, self.digr.num_vertices()))
+                logging.debug('Drawn %s of the nodes in the graph (%d/%d)' % (per, num_drawn, digr.num_vertices()))
                 if next_logged == 0.25:
                     next_logged = 0.5
                 elif next_logged == 0.5:
@@ -178,18 +215,23 @@ class _GraphDiff(object):
                     next_logged = 1.0
 
         # Continue drawing here
-        vpen = self.digr.new_vertex_property('float')
+        vpen = digr.new_vertex_property('float')
         vpen.a = 0.2
-        epen = self.digr.new_edge_property('float')
+        epen = digr.new_edge_property('float')
         epen.a = 0.5
-        marker = self.digr.new_edge_property('float')
+        marker = digr.new_edge_property('float')
         marker.a = 2.5
-        gt.graph_draw(self.digr,
-                      vertex_fill_color=self.digr.vp['color'],
-                      vertex_shape=self.digr.vp['shape'],
+        gt.graph_draw(digr,
+                      vertex_fill_color=digr.vp['color'],
+                      vertex_shape=digr.vp['shape'],
+                      # vertex_size=self.digr.vp['graph_size'],
                       vertex_pen_width=vpen,
                       edge_pen_width=epen,
                       edge_marker_size=marker,
+                      display_props=[digr.vp['filename_end'],
+                                     digr.vp['inode'],
+                                     digr.vp['dir_depth'],
+                                     digr.vp['gt_min_depth']],
                       )
 
     def add_from_file(self, file_path, img_file_id=1):
@@ -210,13 +252,6 @@ class _GraphDiff(object):
         xml_tree_root = etree.parse(file_path).getroot()
         ns = '{http://www.forensicswiki.org/wiki/Category:Digital_Forensics_XML}'
         logging.info('DFXML converted to element tree. Importing into the graph.')
-
-        ex_pat_dot = re.compile('/\.\.?$')
-        ex_pat_shadow = re.compile('^/?home/\.shadow/(.+)')
-        in_pat_home = re.compile('^/?home$')
-        in_pat_shadow = re.compile('^/?home/\.shadow$')
-        in_pat_vault = re.compile('^/?home/\.shadow/[0-9a-z]*?/vault/user/')
-        enc_pat = re.compile('/ECRYPTFS_FNEK_ENCRYPTED\.([^/]*)$')
 
         # Node info storage
         inode_paths = {}
@@ -282,18 +317,18 @@ class _GraphDiff(object):
                     continue
 
                 # Exclude all files that end in '/.' or '/..'
-                if re.search(ex_pat_dot, filename):
+                if re.search(self.ex_pat_dot, filename):
                     continue
 
                 skip_add_edge = False
                 is_home = False
-                if re.search(in_pat_home, filename):
+                if re.search(self.in_pat_home, filename):
                     # Include 'home' and 'home/.shadow' so that other file objects can create edges with them
                     skip_add_edge = True
                     is_home = True
-                elif re.search(in_pat_shadow, filename):
+                elif re.search(self.in_pat_shadow, filename):
                     pass
-                elif not re.search(ex_pat_shadow, filename):
+                elif not re.search(self.ex_pat_shadow, filename):
                     # Exclude all files that don't start with 'home/.shadow/'
                     continue
 
@@ -303,14 +338,23 @@ class _GraphDiff(object):
                 parent_obj = int(file_obj.find('parent_object').findtext(ns + 'inode'))
                 meta_type = int(file_obj.findtext('meta_type'))
                 self.type_count[meta_type] += 1
-                encrypted = bool(re.search(enc_pat, filename))
+                encrypted = bool(re.search(ENC_PAT, filename))
                 filename_id = sha256(filename.encode('utf-8')).hexdigest()
 
+                # Coerce the parent object to be a directory if it isn't
+                try:
+                    if self.digr.vp['type'][parent_obj][0] != 2:
+                        self.digr.vp['type'][parent_obj][0] = 2
+                        logging.debug('Coerced inode %d to have file type 2 (dir)' % self.digr.vp['inode'][parent_obj])
+                except ValueError:
+                    # The listed parent inode must not exist in the graph
+                    pass
+
                 # Get depth from /home
-                dir_depth = get_dir_depth(filename)
+                dir_depth = util.get_dir_depth(filename)
                 # Files of interest to us should be in the .../vault/user/ dir and have a depth of at least 7
                 # (when we're filtering, that is)
-                gt_min_depth = bool(re.match(in_pat_vault, filename)) and dir_depth >= MIN_DEPTH
+                gt_min_depth = bool(re.match(IN_PAT_VAULT, filename)) and dir_depth >= MIN_DEPTH
 
                 fs_offset = float('inf')
                 for fs in file_obj.iter_grandchild('byte_runs', 'byte_run'):
@@ -342,7 +386,7 @@ class _GraphDiff(object):
                          "parent_inode": parent_obj,
                          # "filename": filename,
                          "filename_id": filename_id,
-                         "filename_end": filename[-13:],
+                         "filename_end": path.basename(filename[-13:]),
                          "name_type": file_obj.findtext('name_type'),
                          "type": (meta_type,),  # Needs to be hashable for Graphviz to not choke
                          "alloc": alloc,
@@ -379,6 +423,29 @@ class _GraphDiff(object):
 
                 if inode_num in inode_paths and inode_paths[inode_num] != _id:
                     num_duplicate_parent_dirs += 1
+                    dup_ver = self.gi[inode_paths[inode_num]]
+                    # If the depth of the new vertex is lower (closer to /home), replace the old one
+                    if attrs['dir_depth'] < self.digr.vp['dir_depth'][dup_ver]:
+                        # Mark the duplicate vertex for removal later
+                        # vertices_to_remove.append(dup_ver)
+                        # Remove the edge from the "to add" list of the old vertex
+                        try:
+                            edges_to_add.remove((self.digr.vp['parent_inode'][dup_ver], int(dup_ver)))
+                        except ValueError:
+                            # There was no matching entry in the "to add" list
+                            pass
+                            # edges_to_remove.append((self.digr.vp['parent_inode'][dup_ver], int(dup_ver)))
+                            # print('%s was not in the list of edges to add' % ((self.digr.vp['parent_inode'][dup_ver], int(dup_ver)),))
+                        edges_to_add.append((parent_obj, int(dup_ver)))
+                        for a in attrs:
+                            if a in ('type', 'src_files'):
+                                self.digr.vp[a][dup_ver] = (attrs[a])
+                            else:
+                                self.digr.vp[a][dup_ver] = attrs[a]
+                        inode_paths[inode_num] = _id
+                        self.gi[_id] = dup_ver
+                        continue
+
                 else:
                     inode_paths[inode_num] = _id
 
@@ -405,6 +472,7 @@ class _GraphDiff(object):
 
                 if is_home:
                     self.home_vertex = vertex
+                    self.digr.vp['color'][vertex] = [0, 0.8, 0, 0.9]
                 if not skip_add_edge:
                     edges_to_add.append((parent_obj, int(vertex)))
 
@@ -424,9 +492,28 @@ class _GraphDiff(object):
 
         for u, v in edges_to_add:
             if INODE_ONLY:
-                self.digr.add_edge(u, v)
+                pass
             else:  # Includes when HASH_LABEL == True
-                self.digr.add_edge(self.gi[inode_paths[u]], v)
+                u = self.gi[inode_paths[u]]
+
+            if u == v:  # Don't add edges between a vertex and itself
+                continue
+
+            if self.digr.vertex(v).in_degree():
+                for p in self.digr.vertex(v).in_neighbours():
+                    self.digr.remove_edge(self.digr.edge(p, self.digr.vertex(v)))
+
+            self.digr.add_edge(u, v, False)
+
+    def add_from_mount(self, mount_point):
+        # TODO: Do we need to keep from adding duplicates to this graph?
+        logging.info('Beginning import from mount point: %s' % mount_point)
+        make_graph_from_dir(mount_point, self.digr)
+        self.home_vertex = get_tree_top(self.digr)
+
+        # Set the default value for the keeper flag as True for all vertices
+        for v in self.digr.vertices():
+            self.digr.vp['keeper'][v] = True
 
     def _save_duplicate_info(self, duplicates):
         """
@@ -521,33 +608,58 @@ class _GraphDiff(object):
         if self.home_vertex is None:
             raise TypeError('Must generate the graph before trimming it.')
 
+        self._filter_depth = filter_depth
+
         deg_before = self.digr.num_vertices()
+        trim_stats = {'min_depth': 0,
+                      'no_parent': 0}
 
         for n in self.home_vertex.out_neighbours():
             # This should only have one item (.shadow), but just in case...
             self._check_eval(n)
 
-        # Remove the vertices marked for removal
-        for v in self._to_remove:
-            self.gi.pop(self.digr.vp[self._id][v])
-        self.digr.remove_vertex(self._to_remove)
-        self._to_remove = []
+        # This isn't very efficient, but we need to remove all vertices with no in-neighbors
+        for v in self.digr.vertices():
+            # if v in self._to_remove:
+            if not self.digr.vp['keeper'][v]:
+                continue
+            if filter_depth and not self.digr.vp['gt_min_depth'][v]:
+                self.digr.vp['keeper'][v] = False
+                self._to_remove.append(v)
+                trim_stats['min_depth'] += 1
+            elif v == self.home_vertex:
+                continue
+            elif not v.in_degree() and not v.out_degree():
+                self.digr.vp['keeper'][v] = False
+                self._to_remove.append(v)
+                trim_stats['no_parent'] += 1
+        # print(self.home_vertex in self._to_remove)
+
+        # for v in self._to_remove:
+        #     self.digr.vp['color'][v] = [0, 0, 0, 0.8]
+        #     self.digr.vp['keeper'][v] = False
+
+        if filter_depth:
+            # Using an actual filter is faster, but I couldn't get the stupid thing to work right.
+            self.digr.clear_filters()  # Clear any previously set vertex filters
+            # self.digr.set_vertex_filter(self.digr.vp['gt_min_depth'])
+            self.digr.set_vertex_filter(self.digr.vp['keeper'])
+            self.digr.purge_vertices()
+
+            # Get the straggler vertices
+            for v in self.digr.vertices():
+                if not v.in_degree() and not v.out_degree():
+                    self.digr.vp['keeper'][v] = False
+            self.digr.set_vertex_filter(self.digr.vp['keeper'])
+            self.digr.purge_vertices()
+            # self.digr.clear_filters()  # Clear any previously set vertex filters
+
+            logging.debug('Graph now has %s objects' % self.digr.num_vertices())
 
         deg_diff = deg_before - self.digr.num_vertices()
 
         logging.info('Finished trimming %d unuseful nodes from the graph.' % deg_diff)
-
-        if filter_depth:
-            # Using an actual filter is faster, but I couldn't get the stupid thing to work right.
-            # self.digr.set_vertex_filter(None)  # Clear any previously set vertex filters
-            # self.digr.set_vertex_filter(self.digr.vp['gt_min_depth'])
-            # logging.debug('Filtered all vertices with dir depth < %d' % MIN_DEPTH)
-            rm_verts = []
-            for v in self.digr.vertices():
-                if not self.digr.vp['gt_min_depth'][v]:
-                    rm_verts.append(v)
-            self.digr.remove_vertex(rm_verts)
-            logging.debug('Removed all vertices with dir depth < %d' % MIN_DEPTH)
+        logging.debug('Below min depth:  %d    No parent node:  %d' % (trim_stats['min_depth'], trim_stats['no_parent']))
 
     def _check_eval(self, vertex):
         raise NotImplementedError
@@ -616,7 +728,8 @@ class FilesDiff(_GraphDiff):
           b. It is at the depth of the Extensions directory and is an
              encrypted directory
           c. It is at the depth of either the Extensions directory or the
-             <Extension ID> directory and has only directory successors
+             <Extension ID> directory and has only non-empty directory
+             successors
 
         When this recursive method is followed directly by another pass over
         the vertices to remove all that are not of minimum depth, the
@@ -640,15 +753,38 @@ class FilesDiff(_GraphDiff):
             return self._force_false(vertex)
 
         # If this is at the same depth as the Extensions dir, it should be an encrypted directory
-        if self.digr.vp['dir_depth'][vertex] == (FILTERED_MIN_DEPTH - 1) and \
-                (not vertex_is_dir(vertex) or not self.digr.vp['encrypted'][vertex]):
+        if self.digr.vp['dir_depth'][vertex] == (FILTERED_MIN_DEPTH - 2) and \
+                (not vertex_is_dir(vertex, self.digr) or not self.digr.vp['encrypted'][vertex]):
+            self.check_warn_removal(vertex, 'not an encrypted dir at Extensions dir level')
             return self._force_false(vertex)
 
-        # If this is at the same depth as the Extensions dir or the Extension ID dir, it should have only dir children
-        if self.digr.vp['dir_depth'][vertex] in (FILTERED_MIN_DEPTH, FILTERED_MIN_DEPTH - 1):
+        # If this is at the same depth as the Extensions dir, it should have only dir children and grandchildren
+        if self.digr.vp['dir_depth'][vertex] == FILTERED_MIN_DEPTH - 2:
+            self.digr.vp['color'][vertex] = [0.8, 0.8, 0, 0.9]
+            all_dir_children = vertex.out_degree() > 0
+            for c in vertex.out_neighbours():  # Check children
+                # break
+                if not vertex_is_dir(c, self.digr):
+                    all_dir_children = False
+                    self.check_warn_removal(vertex, 'non-dir child vertex at Extension dir level')
+                    break
+
+                for gc in c.out_neighbours():  # Check grandchildren
+                    depth_differs_by_two = (self.digr.vp['dir_depth'][gc] - self.digr.vp['dir_depth'][vertex]) == 2
+                    if not depth_differs_by_two:
+                        self._force_false(gc)
+                        continue
+
+                if not all_dir_children:
+                    break
+            if not all_dir_children:
+                return self._force_false(vertex)
+
+        # If this is at the same depth as the Extension ID dir, it should have only dir children
+        if self.digr.vp['dir_depth'][vertex] == FILTERED_MIN_DEPTH - 1:
             all_dir_children = vertex.out_degree() > 0
             for c in vertex.out_neighbours():
-                if not vertex_is_dir(c):
+                if not vertex_is_dir(c, self.digr):
                     all_dir_children = False
                     break
             if not all_dir_children:
@@ -659,9 +795,12 @@ class FilesDiff(_GraphDiff):
             _e = self._check_eval(c)
             if not _e:
                 self._to_remove.append(c)
+                self.digr.vp['keeper'][c] = False
             any_children_true = any_children_true or _e
 
         self.digr.vp["eval"][vertex] = any_children_true
+        if self._filter_depth:
+            any_children_true = any_children_true and self.digr.vp['dir_depth'][vertex] >= MIN_DEPTH
         return any_children_true
 
     def _force_false(self, vertex):
@@ -671,13 +810,19 @@ class FilesDiff(_GraphDiff):
             self._check_eval(c, force_false=True)
         return False
 
+    def check_warn_removal(self, vertex, msg, v_prop='inode', warn_list=(KNOWN_EXT_DIR,)):
+        if self.digr.vp[v_prop][vertex] in warn_list or not len(warn_list):
+            logging.warning('Removing inode %d because: %s' % (self.digr.vp['inode'][vertex], msg))
 
-def vertex_is_dir(vertex, strict=False):
+
+def vertex_is_dir(vertex, graph, strict=False):
     """
     Given a vertex, return whether it represents a directory.
 
     :param vertex: The vertex to test.
     :type vertex: graph_tool.Vertex
+    :param graph: The graph that vertex belongs to.
+    :type graph: graph_tool.Graph
     :param strict: If True, the first type stored in the vertex property
         vector must be the one that indicates a directory. Otherwise, any of
         the values in the vector that match will return True.
@@ -685,7 +830,6 @@ def vertex_is_dir(vertex, strict=False):
     :return: Whether the vertex represents a directory.
     :rtype: bool
     """
-    graph = vertex.get_graph(vertex)
     if strict:
         return graph.vp['type'][vertex][0] == 2
 
@@ -695,31 +839,26 @@ def vertex_is_dir(vertex, strict=False):
     return False
 
 
-def get_dir_depth(filename):
-    """
-    Calculate how many directories deep the filename is.
-
-    :param filename: The path to be split and counted.
-    :type filename: str
-    :return: The number of directory levels in the filename.
-    :rtype: int
-    """
-    dir_depth = 0
-    _head = filename
-    while True:
-        prev_head = _head
-        _head, _tail = path.split(_head)
-        if prev_head == _head:
-            break
-        if len(_tail) == 0:
-            continue
-        dir_depth += 1
-        if len(_head) == 0:
-            break
-    return dir_depth
+FILTERED_MIN_DEPTH = util.get_dir_depth('/home/.shadow/<user ID>/vault/user/<encrypted Extensions>/'
+                                        '<encrypted extension ID>/<encrypted extension version>/')
 
 
-FILTERED_MIN_DEPTH = get_dir_depth('/home/.shadow/<user ID>/vault/user/<encrypted Extensions>/<encrypted extension ID>/')
+def init_logging(log_file=None, verbose=False):
+    if log_file is None:
+        _log_path = path.join(path.dirname(path.realpath(__file__)), '../log', "graph_diff.log")
+    else:
+        _log_path = log_file
+
+    # Initialize logging
+    with open(_log_path, 'a') as fout:
+        fout.write((' --  '*15)+'\n')
+    log_format = '%(asctime)s %(levelname) 8s -- %(message)s'
+    if verbose:
+        log_level = logging.DEBUG
+    else:
+        log_level = logging.INFO
+    logging.basicConfig(filename=_log_path, level=log_level, format=log_format)
+    util.add_color_log_levels(center=True)
 
 
 def main(args):
@@ -741,17 +880,7 @@ def main(args):
     to_compare = []
     dfxml_ext = re.compile('\.df\.xml$')
 
-    # Initialize logging
-    _log_path = path.join(path.dirname(path.realpath(__file__)), '../log', "graph_diff.log")
-    with open(_log_path, 'a') as fout:
-        fout.write((' --  '*15)+'\n')
-    log_format = '%(asctime)s %(levelname) 8s -- %(message)s'
-    if args['-v']:
-        log_level = logging.DEBUG
-    else:
-        log_level = logging.INFO
-    logging.basicConfig(filename=_log_path, level=log_level, format=log_format)
-    util.add_color_log_levels(center=True)
+    init_logging(verbose=args['-v'])
 
     # Instantiate the diff object and process the files
     diff = ColorDiff(dupl_file=args['-f'])
@@ -797,5 +926,6 @@ if __name__ == '__main__':
     main(docopt(__doc__))
 else:
     # This file was imported, so do all the necessary configuration
+    crx.MIN_DEPTH = FILTERED_MIN_DEPTH
     MIN_DEPTH = FILTERED_MIN_DEPTH
     MAX_FILES = 1

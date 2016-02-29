@@ -28,29 +28,33 @@ such, no de-constructors or other specified methods can be called to
 gracefully handle shutdown.
 """
 
-from centroid import *
-from chrome_db import *
-from datetime import date, datetime, timedelta
-from docopt import docopt
-import graph_tool.all as gt
-from hashlib import sha256
 import json
 import logging
-from lxml import etree
 import os
-from os import path
 import queue
+import stat
+import threading
+from datetime import date, datetime, timedelta
+from hashlib import sha256
+from os import path
+import re
+from string import ascii_lowercase
+from time import sleep
+from zipfile import BadZipFile
+
+import graph_tool.all as gt
 import requests
+from docopt import docopt
+from lxml import etree
 from requests.exceptions import ChunkedEncodingError
 from sqlalchemy import MetaData, Table, select, and_, update
 from sqlalchemy.exc import IntegrityError
-import stat
-from string import ascii_lowercase
-import threading
-from time import sleep
+
+from centroid import *
+from chrome_db import *
+from const import EVAL_NONE, IN_PAT_VAULT, ENC_PAT, MIN_DEPTH
 from unpack import unpack
-from util import verify_crx_availability, add_color_log_levels
-from zipfile import BadZipFile
+from util import verify_crx_availability, add_color_log_levels, get_dir_depth, SLICE_PAT
 
 # Make 'requests' library only log things if they're at least a warning
 logging.getLogger('requests').setLevel(logging.WARNING)
@@ -64,6 +68,13 @@ FILE_TYPES = {stat.S_IFREG: 1,
               stat.S_IFIFO: 5,
               stat.S_IFSOCK: 6,
               stat.S_IFLNK: 7}
+TYPE_TO_NAME = {1: 'r',
+                2: 'd',
+                3: 'c',  # TODO: 3-7 may not actually correspond to the DFXML standard
+                4: 'b',
+                5: 'f',
+                6: 's',
+                7: 'l'}
 CHROME_VERSION = None
 DOWNLOAD_URL = None
 DBLING_DIR = None
@@ -202,32 +213,33 @@ def _init_graph():
     gr = gt.Graph()
     # Create the internal property maps
     # TODO: Clean this up when the fields are finalized
-    # gr.vp['inode'] = gr.new_vertex_property('int')
-    # gr.vp['parent_inode'] = gr.new_vertex_property('int')
+    gr.vp['inode'] = gr.new_vertex_property('int')
+    gr.vp['parent_inode'] = gr.new_vertex_property('int')
+    gr.vp['filename'] = gr.new_vertex_property('string')
     gr.vp['filename_id'] = gr.new_vertex_property('string')
-    # gr.vp['filename_end'] = gr.new_vertex_property('string')
-    # gr.vp['name_type'] = gr.new_vertex_property('string')
+    gr.vp['filename_end'] = gr.new_vertex_property('string')
+    gr.vp['name_type'] = gr.new_vertex_property('string')
     gr.vp['type'] = gr.new_vertex_property('vector<short>')
     # gr.vp['alloc'] = gr.new_vertex_property('bool')
     # gr.vp['used'] = gr.new_vertex_property('bool')
     # gr.vp['fs_offset'] = gr.new_vertex_property('string')
-    # gr.vp['filesize'] = gr.new_vertex_property('string')
+    gr.vp['filesize'] = gr.new_vertex_property('string')
     # gr.vp['src_files'] = gr.new_vertex_property('vector<short>')
-    # gr.vp['encrypted'] = gr.new_vertex_property('bool')
-    # gr.vp['eval'] = gr.new_vertex_property('bool')
+    gr.vp['encrypted'] = gr.new_vertex_property('bool')
+    gr.vp['eval'] = gr.new_vertex_property('bool')
     gr.vp['size'] = gr.new_vertex_property('string')
     gr.vp['mode'] = gr.new_vertex_property('string')
-    # gr.vp['uid'] = gr.new_vertex_property('string')
-    # gr.vp['gid'] = gr.new_vertex_property('string')
-    # gr.vp['nlink'] = gr.new_vertex_property('string')
-    # gr.vp['mtime'] = gr.new_vertex_property('string')
+    gr.vp['uid'] = gr.new_vertex_property('string')
+    gr.vp['gid'] = gr.new_vertex_property('string')
+    gr.vp['nlink'] = gr.new_vertex_property('string')
+    gr.vp['mtime'] = gr.new_vertex_property('string')
     gr.vp['ctime'] = gr.new_vertex_property('string')
-    # gr.vp['atime'] = gr.new_vertex_property('string')
+    gr.vp['atime'] = gr.new_vertex_property('string')
     # gr.vp['crtime'] = gr.new_vertex_property('string')
     # gr.vp['color'] = gr.new_vertex_property('vector<float>')
     # gr.vp['shape'] = gr.new_vertex_property('string')
-    # gr.vp['dir_depth'] = gr.new_vertex_property('short')
-    # gr.vp['gt_min_depth'] = gr.new_vertex_property('bool')
+    gr.vp['dir_depth'] = gr.new_vertex_property('short')
+    gr.vp['gt_min_depth'] = gr.new_vertex_property('bool')
     return gr
 
 
@@ -259,7 +271,7 @@ def separate_mode_type(mode):
     return m, FILE_TYPES.get(t, 0)
 
 
-def make_graph_from_dir(top_dir):
+def make_graph_from_dir(top_dir, digr=None):
     """
     Given a directory path, create and return a directed graph representing it
     and all its contents.
@@ -273,10 +285,15 @@ def make_graph_from_dir(top_dir):
     # TODO: dd? DFXML? Or is that overkill?
 
     # Initialize the graph with all the vertex properties, then add the top directory vertex
-    digr = _init_graph()
+    slice_path = True  # TODO: Not working
+    if digr is None or not isinstance(digr, gt.Graph):
+        digr = _init_graph()
+        slice_path = False
     dir_v = digr.add_vertex()
-    _id = _set_vertex_props(digr, dir_v, top_dir)
+    _id = _set_vertex_props(digr, dir_v, top_dir, slice_path)
     id_to_vertex = {_id: dir_v}
+
+    ttl_objects = 1
 
     for dirpath, dirnames, filenames in os.walk(top_dir):
         dir_id = sha256(path.abspath(dirpath).encode('utf-8')).hexdigest()
@@ -284,14 +301,16 @@ def make_graph_from_dir(top_dir):
         for f in dirnames + filenames:
             full_filename = path.join(dirpath, f)
             vertex = digr.add_vertex()
-            vertex_id = _set_vertex_props(digr, vertex, full_filename)
-            id_to_vertex[vertex_id] = vertex
             digr.add_edge(id_to_vertex[dir_id], vertex)
+            vertex_id = _set_vertex_props(digr, vertex, full_filename, slice_path)
+            id_to_vertex[vertex_id] = vertex
+            ttl_objects += 1
 
+    logging.info('Total imported file objects: %d' % ttl_objects)
     return digr
 
 
-def _set_vertex_props(digraph, vertex, filename):
+def _set_vertex_props(digraph, vertex, filename, slice_path=False):
     """
     Use Python's os.stat method to store information about the file in the
     vertex properties of the graph the vertex belongs to. Return the SHA256
@@ -308,16 +327,45 @@ def _set_vertex_props(digraph, vertex, filename):
     """
     # Get the full, normalized path for the filename, then get its stat() info
     filename = path.abspath(filename)
-    st = os.stat(filename)
+    st = os.stat(filename, follow_symlinks=False)
 
     # Set all the attributes for the top directory vertex
     filename_id = sha256(filename.encode('utf-8')).hexdigest()
-    digraph.vp['filename_id'][vertex] = filename_id
     m, t = separate_mode_type(st.st_mode)
+
+    sliced_fn = filename
+    if slice_path:
+        _m = re.search(SLICE_PAT, filename)
+        if _m:
+            sliced_fn = _m.group(1)
+    dir_depth = get_dir_depth(sliced_fn)
+
+    try:
+        parent_ver = list(vertex.in_neighbours())[0]
+    except IndexError:
+        pass
+    else:
+        digraph.vp['parent_inode'][vertex] = digraph.vp['inode'][parent_ver]
+
+    digraph.vp['inode'][vertex] = st.st_ino
+    digraph.vp['filename'][vertex] = filename
+    digraph.vp['filename_id'][vertex] = filename_id
+    digraph.vp['filename_end'][vertex] = path.basename(filename[-13:])
+    digraph.vp['name_type'][vertex] = TYPE_TO_NAME[t]
     digraph.vp['type'][vertex] = (t,)
-    digraph.vp['mode'][vertex] = str(m)
+    digraph.vp['filesize'][vertex] = str(st.st_size)
     digraph.vp['size'][vertex] = str(st.st_size)
+    digraph.vp['encrypted'][vertex] = bool(re.search(ENC_PAT, sliced_fn))
+    digraph.vp['eval'][vertex] = EVAL_NONE
+    digraph.vp['dir_depth'][vertex] = dir_depth
+    digraph.vp['gt_min_depth'][vertex] = bool(re.match(IN_PAT_VAULT, sliced_fn)) and dir_depth >= MIN_DEPTH
+    digraph.vp['mode'][vertex] = str(m)
+    digraph.vp['uid'][vertex] = st.st_uid
+    digraph.vp['gid'][vertex] = st.st_gid
+    digraph.vp['nlink'][vertex] = st.st_nlink
+    digraph.vp['mtime'][vertex] = datetime.fromtimestamp(st.st_mtime).strftime(ISO_TIME)
     digraph.vp['ctime'][vertex] = datetime.fromtimestamp(st.st_ctime).strftime(ISO_TIME)
+    digraph.vp['atime'][vertex] = datetime.fromtimestamp(st.st_atime).strftime(ISO_TIME)
     return filename_id
 
 
@@ -459,6 +507,7 @@ def update_database(download_fresh_list=True, thread_count=5, queue_max=25, show
     try:
         # Put each CRX ID on the jobs queue
         with db_conn.begin():
+            # TODO: Change the following to only select starting from start_at, when applicable
             result = db_conn.execute(select([id_table]))
             for row in result:
                 if start_at is not None and row[0] < start_at:

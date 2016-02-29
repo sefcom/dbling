@@ -1,8 +1,15 @@
 
-import clr
 import logging
-import requests
+from os import path
+import re
 from time import sleep
+
+import requests
+
+import clr
+
+
+SLICE_PAT = re.compile('.*(/home.*)')
 
 
 def verify_crx_availability(crx_id):
@@ -80,3 +87,31 @@ def add_color_log_levels(center=False):
     logging.addLevelName(20, clr.black(clr.blue(i, True)))
     logging.addLevelName(10, clr.black(clr.green(d, True)))
     logging.addLevelName(0, clr.black(clr.white(n, True)))
+
+
+def get_dir_depth(filename, slice_path=False):
+    """
+    Calculate how many directories deep the filename is.
+
+    :param filename: The path to be split and counted.
+    :type filename: str
+    :return: The number of directory levels in the filename.
+    :rtype: int
+    """
+    if slice_path:
+        m = re.search(SLICE_PAT, filename)
+        if m:
+            filename = m.group(1)
+    dir_depth = 0
+    _head = filename
+    while True:
+        prev_head = _head
+        _head, _tail = path.split(_head)
+        if prev_head == _head:
+            break
+        if len(_tail) == 0:
+            continue
+        dir_depth += 1
+        if len(_head) == 0:
+            break
+    return dir_depth

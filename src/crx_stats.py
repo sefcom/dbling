@@ -1,11 +1,12 @@
 from datetime import datetime
 import json
 from re import match
+from subprocess import check_output
 
 from bs4 import BeautifulSoup as Bsoup
 from plotly import offline as plotoff
-from plotly.graph_objs import Bar
-from sqlalchemy import Table, select, update, and_, insert
+from plotly.graph_objs import Bar, Layout, Figure
+from sqlalchemy import Table, select, update, and_, insert, desc
 
 from chrome_db import *
 
@@ -28,6 +29,7 @@ def set_all_centroid_families():
                                               # cent_fam.c.ctime == e_row[extension.c.ctime],
                                               cent_fam.c.num_dirs == e_row[extension.c.num_dirs],
                                               cent_fam.c.num_files == e_row[extension.c.num_files],
+                                              cent_fam.c.ttl_files == e_row[extension.c.ttl_files],
                                               cent_fam.c.perms == e_row[extension.c.perms],
                                               cent_fam.c.depth == e_row[extension.c.depth],
                                               cent_fam.c.type == e_row[extension.c.type],))
@@ -52,6 +54,7 @@ def set_all_centroid_families():
                             # 'ctime': e_row[extension.c.ctime],
                             'num_dirs': e_row[extension.c.num_dirs],
                             'num_files': e_row[extension.c.num_files],
+                            'ttl_files': e_row[extension.c.ttl_files],
                             'perms': e_row[extension.c.perms],
                             'depth': e_row[extension.c.depth],
                             'type': e_row[extension.c.type],
@@ -66,6 +69,8 @@ def set_all_centroid_families():
 
         if cnt and not cnt % 1000:
             print('Added %d extensions to a family' % cnt)
+
+    print('Added %d extensions to a family' % cnt)
 
     # TODO: We should do the same kind of thing for all the extensions' i_centroid_group
 
@@ -85,13 +90,15 @@ def calc_it(db_conn=None):
     cent_fam = Table('centroid_family', DB_META)
 
     # Cycle through the centroid family IDs
+    # TODO: Make this more efficient by selecting only those that are NULL or all members > distinct
     s = select([cent_fam.c.pk])
     for f2_row in db_conn.execute(s):
         # Query the extension table for the members of the family, counting the distinct ones
-        s_cnt = select([extension.c.ext_id], distinct=True).\
-            select_from(select([extension.c.ext_id, extension.c.pk]).
-                        where(extension.c.centroid_group == f2_row[cent_fam.c.pk]).alias('all_members')).\
-            alias('distinct_id_members').count()
+        all_mem = select([extension.c.ext_id, extension.c.pk]).\
+            where(extension.c.centroid_group == f2_row[cent_fam.c.pk]).alias('all_members')
+        s_cnt = select([all_mem.c.ext_id], distinct=True).select_from(all_mem).alias('distinct_id_members').count()
+        # print(str(s_cnt))
+        # break
         n = int(db_conn.execute(s_cnt).fetchone()[0])
 
         # Add this count as the distinct_id_members field
@@ -217,3 +224,82 @@ def id_from_url(url):
     m = match(pat, url)
     if m:
         return m.group(1)
+
+
+def get_num_files():
+    # Get a handle on the DB and table
+    db_conn = DB_META.bind.connect()
+    extension = Table('extension', DB_META)
+
+    # Iterate through the DB, get the ID and version number
+    s = select([extension.c.pk, extension.c.ext_id, extension.c.version]).where(extension.c.ttl_files.is_(None))
+    cnt = 0
+    not_found = 0
+    for row in db_conn.execute(s):
+        # CWD to the location of the unpacked CRX
+        the_dir = '/var/lib/dbling/unpacked/{}/{}'.format(row[extension.c.ext_id], row[extension.c.version])
+
+        # Execute `find | wc -l` to get the number of files
+        try:
+            ttl_files = int(check_output('/usr/bin/find | /usr/bin/wc -l', shell=True, cwd=the_dir).strip())
+        except FileNotFoundError:
+            # Doesn't hurt anything that we don't have the files for this extension, but we should count it
+            not_found += 1
+            continue
+
+        # Update the DB with the number of files
+        with db_conn.begin():
+            db_conn.execute(update(extension).where(extension.c.pk == row[extension.c.pk]).values(ttl_files=ttl_files))
+
+        cnt += 1
+        if cnt and not cnt % 1000:
+            print('Counted files for %d extensions' % cnt)
+
+    print('Counted files for %d extensions' % cnt)
+    if not_found:
+        print("%d database entries don't have corresponding files saved." % not_found)
+    db_conn.close()
+
+
+def family_histogram():
+    db_conn = DB_META.bind.connect()
+    cent_fam = Table('centroid_family', DB_META)
+
+    # Get the number of members in each centroid family, in descending order
+    d = {'x': [], 'y': []}
+    s = select([cent_fam.c.distinct_id_members]).order_by(desc(cent_fam.c.distinct_id_members))
+    x = 0
+
+    for row in db_conn.execute(s):
+        x += 1
+        d['x'].append(x)
+        d['y'].append(row[cent_fam.c.distinct_id_members])
+        if x >= 200:
+            break
+    db_conn.close()
+
+    data = [Bar(x=d['x'], y=d['y'])]
+    layout = Layout(xaxis=dict(autorange=True), yaxis=dict(type='log', autorange=True))
+    fig = Figure(data=data, layout=layout)
+
+    plotoff.plot(fig, show_link=False, filename='centroid_family_hist.html')#, auto_open=False, layout=layout)
+
+
+def tao_histo():
+    db_conn = DB_META.bind.connect()
+    extension = Table('extension', DB_META)
+
+    d = {'x': [], 'y': []}
+
+    # Get the set of distinct ttl_files values
+    s = select([extension.c.ttl_files], distinct=True)
+
+    for dist in db_conn.execute(s):
+        x = dist[extension.c.ttl_files]
+        t_cnt = select([extension.c.pk]).where(extension.c.ttl_files == x).alias('tao').count()
+        y = db_conn.execute(t_cnt).fetchone()[0]
+        d['x'].append(x)
+        d['y'].append(y)
+
+    data = [Bar(x=d['x'], y=d['y'])]
+    plotoff.plot(data, show_link=False, filename='tao_histo.html', auto_open=True)

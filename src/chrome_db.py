@@ -5,7 +5,7 @@ Initialize the database by ensuring the engine is instantiated and the
 """
 
 import json
-from os import path
+from os import path, uname
 
 from sqlalchemy import create_engine, engine_from_config, MetaData, Table, Column, Integer, String, DateTime, Float, \
     Index, ForeignKey
@@ -16,7 +16,11 @@ with open(path.abspath(path.join(path.dirname(path.realpath(__file__)), 'crx_con
     db_conf = json.load(fin)['db']
 
 
-if 'sqlalchemy.url' not in db_conf:
+if uname().nodename != db_conf['nodename']:
+    create_str = '{}://{}:{}@{}'.format(db_conf['type'], db_conf['user'], db_conf['pass'],
+                                        path.join(db_conf['full_url'], db_conf['name']))
+    DB_ENGINE = create_engine(create_str)
+elif 'sqlalchemy.url' not in db_conf:
     create_str = db_conf['type'] + '://'
     if len(db_conf['user']):
         create_str += db_conf['user']
@@ -30,6 +34,7 @@ else:
 
 DB_META = MetaData()
 DB_META.bind = DB_ENGINE
+# USED_TO_DB doesn't have the ttl_files field because it's not explicitly stored in the graph object
 USED_TO_DB = {'_c_ctime': 'ctime',
               '_c_num_child_dirs': 'num_dirs',
               '_c_num_child_files': 'num_files',
@@ -56,6 +61,7 @@ extension = Table('extension', DB_META,
                   Column('depth', Float),
                   Column('type', Float),
                   Column('centroid_group', Integer, ForeignKey("centroid_family.pk")),
+                  Column('ttl_files', Integer),
 
                   # Image centroid fields, calculated after installing
                   Column('i_size', Float),
@@ -91,6 +97,7 @@ cent_fam = Table('centroid_family', DB_META,
                  Column('depth', Float),
                  Column('type', Float),
                  Column('centroid_group', Integer),
+                 Column('ttl_files', Integer),
 
                  # Stats
                  Column('num_members', Integer),  # Number of rows from 'extension' matching this centroid
