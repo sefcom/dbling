@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Usage: chew [-q|-u] TARGET_DEVICE [OUTPUT_FILE]
+Usage: chew [-q|-u] [-x] [-e] [-v] TARGET_DEVICE [OUTPUT_FILE]
 
 General flow:
 1. Using the device string specified by the user, determine if it is a valid
@@ -13,12 +13,14 @@ General flow:
    and the parent image.
 """
 
-from datetime import datetime
 import logging
-from os import path
-import pyuefi
 import subprocess
+from datetime import datetime
+from os import path
 
+from docopt import docopt
+
+import pyuefi
 
 SEGMENT_SIZE = '10G'
 SECTOR_SIZE = 512
@@ -29,7 +31,7 @@ class Chew(object):
 
     """
 
-    def __init__(self, dev, auto_run=False):
+    def __init__(self, dev, auto_run=False, dd=False, dfxml=None, confirm=False):
         self.dev = dev
 
         # Use pyuefi to get the STATE partition data
@@ -46,10 +48,11 @@ class Chew(object):
         self._dfxml = None
         self._img = None
         if auto_run:
-            self.do_acquisition(self.now)
-            self.do_dfxml()
+            self.do_acquisition(self.now, dd, confirm)
+            if dfxml:
+                self.do_dfxml()
 
-    def do_acquisition(self, stamp=None, dd=False):
+    def do_acquisition(self, stamp=None, dd=False, confirm=False):
         """
         Try acquisition with ewfacquire first, then use dd if it fails.
 
@@ -64,10 +67,10 @@ class Chew(object):
             except ChildProcessError:
                 dd = True
         if dd:
-            self._img = self._do_dd_acquisition(stamp)
+            self._img = self._do_dd_acquisition(stamp, confirm)
         return self._img
 
-    def _do_dd_acquisition(self, stamp=None):
+    def _do_dd_acquisition(self, stamp=None, confirm=False):
         """
         Call dd as a subprocess.
 
@@ -98,6 +101,16 @@ class Chew(object):
         else:
             logging.info('Determined that the STATE partition is located at %s' % self.state_dev_path)
             args = 'sudo dd if={source:s} of={dest:s}'.format(source=self.state_dev_path, dest=image_file)
+
+        if confirm:
+            print('About to execute the following command:')
+            print(args)
+            yn = input('\nWould you like to proceed? [y/N] ')
+            if len(yn) and yn[0].lower() == 'y':
+                pass
+            else:
+                print('Cancelling.\n')
+                exit(1)
 
         # Not sure if we need to pipe any I/O
         mbytes = len_of_partition*SECTOR_SIZE/(1024*1024)
@@ -166,9 +179,10 @@ class Chew(object):
         _img = image_file.rsplit('.', 1)[0]
         self._dfxml = _img + '.df.xml'
 
-        args = 'fiwalk -g -z -G0 -x %s > %s' % (image_file, self._dfxml)
+        args = 'fiwalk -g -z -O -G0 -x %s > %s' % (image_file, self._dfxml)
         # -g    Don't get the file data, just metadata
         # -z    Don't calculate checksums for the files
+        # -O    Only walk allocated files
         # -G0   Process files of all sizes
         # -x    Output to stdout (only way to not get the DTD)
         # %s    Disk image
@@ -190,3 +204,8 @@ class Chew(object):
         :rtype: str
         """
         return self._dfxml
+
+
+if __name__ == '__main__':
+    args = docopt(__doc__)
+    c = Chew(args['TARGET_DEVICE'], True, not args['-e'], args['-x'], args['-v'])
