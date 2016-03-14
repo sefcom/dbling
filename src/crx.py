@@ -110,11 +110,11 @@ def download(crx_id, save_path=None, resp_obj=None):
     # Validate the CRX ID
     # validate_crx_id(crx_id)  # Unnecessary since we've already validated it.
 
-    assert isinstance(resp_obj, requests.Response)
     if resp_obj is None:
         resp = _get_resp_obj(crx_id)
     else:
         resp = resp_obj
+    assert isinstance(resp_obj, requests.Response)
 
     # Save the CRX file
     filename = crx_id + resp.url.rsplit('extension', 1)[-1]  # ID + version
@@ -498,20 +498,19 @@ def update_database(download_fresh_list=True, thread_count=5, queue_max=25, show
 
     if start_at is None:
         logging.info('Adding each CRX to the queue.')
+        ids_select = select([id_table.c.ext_id])
     else:
         assert isinstance(start_at, str)
         assert start_at.isalpha()
         start_at = start_at.lower()
         logging.info('Adding IDs to the queue starting at "%s"' % start_at)
+        ids_select = select([id_table.c.ext_id]).where(id_table.c.ext_id > start_at)
     count = 0
     try:
         # Put each CRX ID on the jobs queue
         with db_conn.begin():
-            # TODO: Change the following to only select starting from start_at, when applicable
-            result = db_conn.execute(select([id_table]))
+            result = db_conn.execute(ids_select)
             for row in result:
-                if start_at is not None and row[0] < start_at:
-                    continue
                 crx_ids.put(row[0])
                 count += 1
                 del row
@@ -1062,7 +1061,11 @@ if __name__ == '__main__':
         del _fout
         DBLING_DIR = path.abspath(path.join(path.expandvars('$DBLING')))
     log_format = '%(asctime)s %(levelname) 8s -- %(message)s'
-    assert args['--log'] in ('CRITICAL', 'ERROR', 'WARNING', 'INFO', 'DEBUG', 'NOTSET')
+    try:
+        assert args['--log'] in ('CRITICAL', 'ERROR', 'WARNING', 'INFO', 'DEBUG', 'NOTSET')
+    except AssertionError:
+        # Fall back to default value of INFO
+        args['--log'] = 'INFO'
     log_level = getattr(logging, args['--log'])
     logging.basicConfig(filename=_log_path, level=log_level, format=log_format)
     add_color_log_levels(center=True)
