@@ -12,7 +12,6 @@ Options:
 import json
 import logging
 import os
-import re
 from hashlib import sha256
 from os import path
 
@@ -23,8 +22,7 @@ from lxml import etree
 from centroid import get_tree_top
 import clr
 from const import *
-import crx
-from crx import make_graph_from_dir
+import crx_crawler
 import util
 
 
@@ -508,7 +506,7 @@ class _GraphDiff(object):
     def add_from_mount(self, mount_point):
         # TODO: Do we need to keep from adding duplicates to this graph?
         logging.info('Beginning import from mount point: %s' % mount_point)
-        make_graph_from_dir(mount_point, self.digr)
+        util.make_graph_from_dir(mount_point, self.digr)
         self.home_vertex = get_tree_top(self.digr)
 
         # Set the default value for the keeper flag as True for all vertices
@@ -926,6 +924,6 @@ if __name__ == '__main__':
     main(docopt(__doc__))
 else:
     # This file was imported, so do all the necessary configuration
-    crx.MIN_DEPTH = FILTERED_MIN_DEPTH
+    crx_crawler.MIN_DEPTH = FILTERED_MIN_DEPTH
     MIN_DEPTH = FILTERED_MIN_DEPTH
     MAX_FILES = 1

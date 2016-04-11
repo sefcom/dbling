@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# *-* coding: utf-8 *-*
 import logging
 from math import e
 from operator import itemgetter
@@ -26,10 +28,20 @@ class Merl:
         self._cent_cols = [getattr(self._cent_fam.c, USED_TO_DB[x]) for x in (USED_FIELDS + ('_c_size',))] + \
                           [self._cent_fam.c.ttl_files]
         self._centroid_select_fields = self._cent_cols + [self._cent_fam.c.pk]
+        self._out_file = None
 
     @property
     def merl(self):
         return self._soup.prettify()
+
+    @property
+    def output_file(self):
+        return self._out_file
+
+    @output_file.setter
+    def output_file(self, stream):
+        if stream is None or hasattr(stream, 'write'):
+            self._out_file = stream
 
     def close_db(self):
         self._db_conn.close()
@@ -104,18 +116,18 @@ class Merl:
 
         # Add the fields to the MERL file  # TODO
         if match_num is not None:
-            print('\nC%d Candidate Matches' % match_num)
-            print('---------------------\n')
+            print('\nC%d Candidate Matches' % match_num, file=self._out_file)
+            print('---------------------\n', file=self._out_file)
         else:
-            print('\nCandidate Matches')
-            print('-----------------\n')
+            print('\nCandidate Matches', file=self._out_file)
+            print('-----------------\n', file=self._out_file)
         n = 0
         for e in sorted(hit_entries, key=itemgetter('confidence'), reverse=True):
             n += 1
-            print('#%d' % n)
+            print('#%d' % n, file=self._out_file)
             for k in e:
-                print('%s: %s' % (k, e[k]))
-            print()
+                print('%s: %s' % (k, e[k]), file=self._out_file)
+            print(file=self._out_file)
 
     def _get_source(self, graph):
         # TODO:

@@ -8,17 +8,34 @@ Usage: case_study.py [options] -d DFXML_FILE
 Options:
  -v   Verbose mode. Changes logging mode from INFO to DEBUG.
  -g   Show graph before searching for matches.
+ -o MERL   Output results to the file MERL.
 """
 import logging
+from os import geteuid, seteuid
+
 from docopt import docopt
+
 from graph_diff import FilesDiff, init_logging
 from merl import Merl
+from graph_tool.topology import shortest_distance
 
 
-def go(start, mounted=False, verbose=False, show_graph=False):
+MAX_DIST = 2147483647  # Assumes the distance PropertyMap will be of type int32
+
+
+def go(start, mounted=False, verbose=False, show_graph=False, output_file=None):
     init_logging(verbose=verbose)
     graph = FilesDiff()
     if mounted:
+        try:
+            euid = geteuid()
+            if euid != 0:
+                seteuid(0)
+        except PermissionError:
+            msg = 'Must have root privileges to read from a mount point.'
+            logging.critical(msg)
+            print('\n%s\n' % msg)
+            raise
         graph.add_from_mount(start)
     else:
         graph.add_from_file(start)
@@ -32,6 +49,7 @@ def go(start, mounted=False, verbose=False, show_graph=False):
 
     logging.info('Searching the DB for matches for each candidate graph. (%d)' % len(candidates))
     merl = Merl()
+    merl.output_file = output_file
     merl.match_candidates(candidates)
     # TODO: Save XML to file
 
@@ -56,17 +74,7 @@ def extract_candidates(orig_graph):
             break
         sub_graph = orig_graph.copy()
 
-        # Pick a vertex, any vertex
-        for start in sub_graph.vertices():
-            break
-
-        sg_vertices = [start]
-
-        # Get the list of parent vertices all the way back, add it to the list of subgraph vertices
-        sg_vertices += get_ancestors(start)
-
-        # Get the list of child vertices all the way down, add it to the list of subgraph vertices
-        sg_vertices += get_descendants(start)
+        sg_vertices = get_subtree_vertices(sub_graph)
 
         # Remove all vertices in the subgraph from the original graph
         rm_list = []
@@ -86,47 +94,45 @@ def extract_candidates(orig_graph):
         if sub_graph.num_vertices():
             # Must have at least one vertex to be of interest to us
             candidates.append(sub_graph)
+            if not len(candidates) % 5:
+                logging.debug('Extracted candidate graph %d' % len(candidates))
 
     return candidates
 
 
-def get_ancestors(node):
+def get_subtree_vertices(g):
     """
-    Return a recursively-discovered list of the vertex's in-neighbors.
+    Return a list of all vertices connected to node.
 
-    :param node: The starting vertex
-    :type node: graph_tool.Vertex
-    :return: The list of all ancestor vertices of the starting vertex.
+    :param g: The graph from which to extract a subgraph.
+    :type g: graph_tool.Graph
+    :return: The list of all vertices in a subgraph of g.
     :rtype: list
     """
+
+    # Get the shortest distance from the first vertex in the graph and everything else
+    dist = shortest_distance(g, g.vertex(0), directed=False)
+
     l = []
-    for v in node.in_neighbours():
-        l.append(v)
-        l += get_ancestors(v)
-    return l
+    for v, i in zip(dist.a, range(len(dist.a))):
+        # If the calculated distance is the max, assume it is infinite (not reachable), i.e. not part of the same
+        # subgraph.
+        if v < MAX_DIST:
+            l.append(g.vertex(i))
 
-
-def get_descendants(node):
-    """
-    Return a recursively-discovered list of the vertex's out-neighbors.
-
-    :param node: The starting vertex.
-    :type node: graph_tool.Vertex
-    :return: The list of all descendant vertices of the starting vertex.
-    :rtype: list
-    """
-    l = []
-    for v in node.out_neighbours():
-        l.append(v)
-        l += get_descendants(v)
     return l
 
 
 if __name__ == '__main__':
     args = docopt(__doc__)
+    _start = None
     if args['-d']:
-        start = args['DFXML_FILE']
+        _start = args['DFXML_FILE']
     elif args['-m']:
-        start = args['MOUNT_POINT']
+        _start = args['MOUNT_POINT']
 
-    go(start, args['-m'], args['-v'])
+    if args['-o'] is not None:
+        with open(args['-o'], 'w') as fout:
+            go(_start, args['-m'], args['-v'], args['-g'], output_file=fout)
+    else:
+        go(_start, args['-m'], args['-v'], args['-g'])
