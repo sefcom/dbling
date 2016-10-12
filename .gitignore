@@ -4,3 +4,6 @@
 images
 src/dbling_conf.json
 src/chrome_ext.db
+*.merl
+creds/
+.vagrant/

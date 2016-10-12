@@ -1,4 +1,4 @@
-{
+conf = {
   "version": "49.0",
   "release_date": [2016, 3, 9],
   "url": "https://clients2.google.com/service/update2/crx?response=redirect&prodversion={}&x=id%3D{}%26installsource%3Dondemand%26uc",

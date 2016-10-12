@@ -8,11 +8,7 @@ from datetime import datetime, date, timedelta
 from hashlib import sha256
 from os import path
 
-import graph_tool.all as gt
-
-from centroid import ISO_TIME
 from clr import add_color_log_levels
-from const import EVAL_NONE, IN_PAT_VAULT, ENC_PAT, MIN_DEPTH
 
 __all__ = ['FILE_TYPES', 'TYPE_TO_NAME', 'SLICE_PAT', 'CRX_URL', 'validate_crx_id', 'MalformedExtId',
            'add_color_log_levels', 'get_dir_depth', 'make_graph_from_dir', 'get_crx_version', 'init_graph',
@@ -110,6 +106,8 @@ def make_graph_from_dir(top_dir, digr=None):
     assert path.isdir(top_dir)
     # TODO: dd? DFXML? Or is that overkill?
 
+    import graph_tool.all as gt
+
     # Initialize the graph with all the vertex properties, then add the top directory vertex
     slice_path = True  # TODO: Not working
     if digr is None or not isinstance(digr, gt.Graph):
@@ -192,6 +190,8 @@ def set_vertex_props(digraph, vertex, filename, slice_path=False):
     :return: SHA256 hash of the file's full, normalized path. (hex digest)
     :rtype: str
     """
+    from centroid import ISO_TIME
+    from const import EVAL_NONE, IN_PAT_VAULT, ENC_PAT, MIN_DEPTH
     # Get the full, normalized path for the filename, then get its stat() info
     filename = path.abspath(filename)
     st = os.stat(filename, follow_symlinks=False)
@@ -243,6 +243,8 @@ def init_graph():
     :return: The graph object.
     :rtype: graph_tool.all.Graph
     """
+    import graph_tool.all as gt
+
     gr = gt.Graph()
     # Create the internal property maps
     # TODO: Clean this up when the fields are finalized

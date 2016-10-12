@@ -16,10 +16,15 @@ with open(path.abspath(path.join(path.dirname(path.realpath(__file__)), 'crx_con
     db_conf = json.load(fin)['db']
 
 
-if uname().nodename != db_conf['nodename']:
+try:
+    _nodename = uname().nodename
+except AttributeError:
+    # Python < 3.3 doesn't return a named tuple
+    _nodename = uname()[1]
+if _nodename != db_conf['nodename']:
     create_str = '{}://{}:{}@{}'.format(db_conf['type'], db_conf['user'], db_conf['pass'],
                                         path.join(db_conf['full_url'], db_conf['name']))
-    DB_ENGINE = create_engine(create_str)
+    DB_ENGINE = create_engine(create_str, convert_unicode=True, pool_recycle=3600, pool_size=10)
 elif 'sqlalchemy.url' not in db_conf:
     create_str = db_conf['type'] + '://'
     if len(db_conf['user']):
