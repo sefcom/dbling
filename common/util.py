@@ -8,7 +8,12 @@ from datetime import datetime, date, timedelta
 from hashlib import sha256
 from os import path
 
-from clr import add_color_log_levels
+import graph_tool.all as gt
+from munch import *
+
+from common.centroid import USED_FIELDS, USED_TO_DB, ISO_TIME
+from common.clr import add_color_log_levels
+from common.const import EVAL_NONE, IN_PAT_VAULT, ENC_PAT, MIN_DEPTH
 
 __all__ = ['FILE_TYPES', 'TYPE_TO_NAME', 'SLICE_PAT', 'CRX_URL', 'validate_crx_id', 'MalformedExtId',
            'add_color_log_levels', 'get_dir_depth', 'make_graph_from_dir', 'get_crx_version', 'init_graph',
@@ -106,8 +111,6 @@ def make_graph_from_dir(top_dir, digr=None):
     assert path.isdir(top_dir)
     # TODO: dd? DFXML? Or is that overkill?
 
-    import graph_tool.all as gt
-
     # Initialize the graph with all the vertex properties, then add the top directory vertex
     slice_path = True  # TODO: Not working
     if digr is None or not isinstance(digr, gt.Graph):
@@ -190,8 +193,6 @@ def set_vertex_props(digraph, vertex, filename, slice_path=False):
     :return: SHA256 hash of the file's full, normalized path. (hex digest)
     :rtype: str
     """
-    from centroid import ISO_TIME
-    from const import EVAL_NONE, IN_PAT_VAULT, ENC_PAT, MIN_DEPTH
     # Get the full, normalized path for the filename, then get its stat() info
     filename = path.abspath(filename)
     st = os.stat(filename, follow_symlinks=False)
@@ -331,3 +332,54 @@ def calc_chrome_version(last_version, release_date, release_period=10):
     today = date.today()
     td = int((today - base_date) / timedelta(weeks=release_period))
     return str(float(last_version) + td)
+
+
+def dt_dict_now():
+    now = datetime.today()
+    val = {'year': now.year,
+           'month': now.month,
+           'day': now.day,
+           'hour': now.hour,
+           'minute': now.minute,
+           'second': now.second,
+           'microsecond': now.microsecond,
+           }
+    return val
+
+
+def dict_to_dt(dt_dict):
+    return datetime(**dt_dict)
+
+
+def cent_vals_to_dict(cent_vals):
+    # Match up the field names with their values for easier insertion to the DB later
+    cent_dict = {}
+    for k, v in zip((USED_FIELDS + ('_c_size',)), cent_vals):
+        cent_dict[USED_TO_DB[k]] = v
+    return cent_dict
+
+
+class MunchyMunch:
+    def __init__(self, f):
+        """Wrapper class to munchify crx_obj parameter.
+
+        This wrapper converts either the kwarg `crx_obj` or the first
+        positional argument (tests in that order) to a Munch object, which
+        allows us to refer to keys in the Munch dictionary as if they were
+        attributes. See the docs on the munch library for more information.
+
+        :param f: The function to wrap.
+        """
+        self.f = f
+        self.__name__ = self.f.__name__
+
+    def __call__(self, *args, **kwargs):
+        kw_done = False
+        if len(kwargs):
+            crx_obj = munchify(kwargs.get('crx_obj'))
+            if crx_obj is not None and isinstance(crx_obj, Munch):
+                kwargs['crx_obj'] = crx_obj
+                kw_done = True
+        if not kw_done and len(args):
+            args = (munchify(args[0]),) + args[1:]
+        return self.f(*args, **kwargs)

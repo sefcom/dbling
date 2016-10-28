@@ -1,6 +1,6 @@
 conf = {
-  "version": "49.0",
-  "release_date": [2016, 3, 9],
+  "version": "54.0",
+  "release_date": [2016, 10, 12],
   "url": "https://clients2.google.com/service/update2/crx?response=redirect&prodversion={}&x=id%3D{}%26installsource%3Dondemand%26uc",
   "extension_list_url": "https://chrome.google.com/webstore/sitemap?shard=0&numshards=1",
   "save_path": "",
@@ -11,7 +11,7 @@ conf = {
     "pass": "",
     "url": "127.0.0.1",
     "name": "chrome",
-    "nodename": "",
+    "nodenames": [""],
     "full_url": ""
   }
 }

@@ -6,7 +6,7 @@ from math import ceil, sqrt
 import graph_tool.all as gt
 from sqlalchemy import Table, select
 
-from chrome_db import DB_META, USED_TO_DB
+from common.chrome_db import DB_META, USED_TO_DB
 
 # USED_FIELDS = ('_c_ctime', '_c_num_child_dirs', '_c_num_child_files', '_c_mode', '_c_depth', '_c_type')
 USED_FIELDS = ('_c_num_child_dirs', '_c_num_child_files', '_c_mode', '_c_depth', '_c_type')

@@ -1,10 +1,10 @@
 requests
 lxml
 sqlalchemy
-crx_unpack>=0.0.3
+crx_unpack>=0.0.4.1
 celery
 eventlet
-pymemcache
 ansible
 pyuefi>=0.1
 aiodns
+munch
