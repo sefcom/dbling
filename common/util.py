@@ -38,6 +38,8 @@ TYPE_TO_NAME = {1: 'r',
 SLICE_PAT = re.compile('.*(/home.*)')
 CRX_URL = 'https://chrome.google.com/webstore/detail/%s'
 
+PROGRESS_PERIOD = 1000
+
 
 def validate_crx_id(crx_id):
     """
@@ -371,7 +373,8 @@ class MunchyMunch:
         :param f: The function to wrap.
         """
         self.f = f
-        self.__name__ = self.f.__name__
+        self.__module__ = self.f.__module__
+        self.__name__ = self.f.__name__  # TODO: This is giving tasks odd names
 
     def __call__(self, *args, **kwargs):
         kw_done = False

@@ -139,7 +139,7 @@ class DownloadCRXList:
     @count.setter
     def count(self, val):
         if not self.count_finalized:
-            self._count += 1
+            self._count = val
 
     @count.deleter
     def count(self):

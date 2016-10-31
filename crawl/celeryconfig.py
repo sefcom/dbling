@@ -9,7 +9,11 @@
 # twice the number of CPU’s is rarely effective, and likely to degrade performance instead.
 
 from celery.schedules import crontab
+from copy import copy
 from datetime import timedelta
+
+from secret.creds import admin_emails, sender_email_addr
+from common.log import log_setup
 
 
 BROKER_URL = 'amqp://'
@@ -17,15 +21,21 @@ CELERY_RESULT_BACKEND = 'amqp://'
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_ACCEPT_CONTENT = ['json']
+CELERY_CHORD_PROPAGATES = False  # If a task fails, send the exception value to the callback, don't just give up
 
 # Acknowledge tasks only once they've completed. If the worker crashes, the job will be requeued.
 CELERY_ACKS_LATE = True
 
+# Logging
+CELERYD_LOG_FORMAT = '%(asctime)s %(levelname) 8s -- %(message)s'
+CELERYD_LOG_COLOR = False  # We'll do our own coloring
+CELERYD_HIJACK_ROOT_LOGGER = False
+log_setup(log_format=CELERYD_LOG_FORMAT)
+
 # Email settings for when tasks fail
 CELERY_SEND_TASK_ERROR_EMAILS = False  # This is the default. Tasks should explicitly set the send_error_emails flag.
-ADMINS = (
-)
-SERVER_EMAIL = ''
+ADMINS = copy(admin_emails)
+SERVER_EMAIL = sender_email_addr
 
 
 # A "beat" service can be started with `celery -A proj beat` that uses the time information to periodically start
@@ -34,7 +44,7 @@ SERVER_EMAIL = ''
 CELERYBEAT_SCHEDULE = {
     'download-every-12-hrs': {
         'task': 'crawl.tasks.start_list_download',
-        # 'schedule': crontab(minute=42, hour='9,21'),
-        'schedule': timedelta(seconds=20),
+        'schedule': crontab(minute=42, hour='9,21'),
+        # 'schedule': timedelta(seconds=20),
     },
 }

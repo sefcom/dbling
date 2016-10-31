@@ -14,7 +14,7 @@ from requests import HTTPError
 
 from common.crx_conf import conf as _conf
 from common.util import calc_chrome_version, dt_dict_now, MalformedExtId, get_crx_version, \
-    cent_vals_to_dict, make_graph_from_dir, MunchyMunch
+    cent_vals_to_dict, make_graph_from_dir, MunchyMunch, PROGRESS_PERIOD
 from common.centroid import calc_centroid
 from crawl.celery import app
 from crawl.webstore_iface import *
@@ -23,7 +23,7 @@ from crawl.db_iface import *
 CHROME_VERSION = calc_chrome_version(_conf['version'], _conf['release_date'])
 DOWNLOAD_URL = _conf['url'].format(CHROME_VERSION, '{}')
 
-TESTING = True
+TESTING = READ_ONLY
 
 
 @app.task
@@ -50,14 +50,15 @@ def start_list_download():
       users apprised of progress without too many log entries.
     """
 
-    logging.warning('Beginning list download...')
+    logging.info('Beginning list download...')
 
     dt_avail = dt_dict_now()  # All CRXs get the same value because we download the list at one specific time
     crx_list = DownloadCRXList(_conf['extension_list_url'])
 
     # TODO: Delete the next lines for production
-    crx_list._downloaded_list = True
-    crx_list._testing = True
+    if TESTING:
+        crx_list._downloaded_list = True
+        crx_list._testing = True
 
     # Download the list, add each CRX to DB, and keep track of how long it all takes
     t1 = perf_counter()
@@ -67,7 +68,7 @@ def start_list_download():
         # penalty to justify all the extra time spent sending and managing the messages. The only down sides are that
         # (1) we lose the ability to distribute the work to multiple nodes and (2) if the process is interrupted, then
         # we lose track of our progress.
-        add_new_crx_to_db({'id': crx, 'dt_avail': dt_avail}, TESTING and not crx_list.count % 1000)
+        add_new_crx_to_db({'id': crx, 'dt_avail': dt_avail}, TESTING and not crx_list.count % PROGRESS_PERIOD)
     ttl_time = str(timedelta(seconds=(perf_counter()-t1)))
 
     # Notify the admins that the download is complete and the list of CRX IDs has been updated
@@ -110,8 +111,8 @@ def process_crx(crx_obj):
         if crx_obj.stop_processing:
             break
 
-    if not crx_obj.job_num % 1000:
-        logging.warning('{}  Completed processing CRX'.format(crx_obj.id))
+    log = (not crx_obj.job_num % PROGRESS_PERIOD) and logging.info or logging.debug
+    log('{}  Completed processing CRX'.format(crx_obj.id))
 
     return crx_obj.msgs
 
@@ -142,11 +143,10 @@ def download_crx(crx_obj):
 
     try:
         # Save the CRX, then check if the DB already has this version.
-        # TODO: Fix the save path for testing environment
         crx_obj = save_crx(crx_obj, DOWNLOAD_URL, save_path=_conf['save_path'])
         crx_obj.dt_downloaded = dt_dict_now()  # Check duplicate will use this to insert a new row if needed
 
-        crx_obj = db_download_complete(crx_obj)
+        db_download_complete(crx_obj)
 
     except MalformedExtId:
         # Don't attempt to download the extension
@@ -267,7 +267,7 @@ def extract_crx(crx_obj):
         logging.debug('%s  Unpack complete' % crx_obj.id)
         crx_obj.extracted_path = extracted_path
         crx_obj.dt_extracted = dt_dict_now()
-        crx_obj = db_extract_complete(crx_obj)
+        db_extract_complete(crx_obj)
 
     return crx_obj
 
@@ -311,21 +311,34 @@ def profile_crx(crx_obj):
 
 @app.task
 def email_list_update_summary(id_count, ttl_time):
-    # Email admins that list download has completed
+    """Email admins that list download has completed.
+
+    Also logs the information at the WARNING level.
+
+    :param id_count: Number of extension IDs processed. Note that this may and
+        probably will differ from the number of IDs added to the database.
+    :type id_count: int
+    :param ttl_time: Length of time it took to download the list and update the
+        database.
+    :type ttl_time: str
+    :rtype: None
+    """
     subject = 'dbling: List update complete'
     body = 'Extension IDs: {}\nRun time: {}'.format(id_count, ttl_time)
-    # body = 'Extension IDs: {}'.format(id_count)
     try:
         app.mail_admins(subject, body)
     except ConnectionRefusedError:
         # Raised when running on a machine that doesn't accept SMTP connections
-        logging.warning('{}\n{}'.format(subject, body))
+        pass
+    logging.warning('{}\n{}'.format(subject, body))
 
 
 @app.task
 @MunchyMunch
 def summarize_job(sub_jobs):
     """Gather all the sub-job stats, email to admins.
+
+    Also logs the information at the WARNING level.
 
     :param sub_jobs: List of messages. Should be from `crx_obj.msgs`.
     :type sub_jobs: list
@@ -345,4 +358,5 @@ def summarize_job(sub_jobs):
         app.mail_admins(subject, body)
     except ConnectionRefusedError:
         # Raised when running on a machine that doesn't accept SMTP connections
-        logging.warning('{}\n{}'.format(subject, body))
+        pass
+    logging.warning('{}\n{}'.format(subject, body))

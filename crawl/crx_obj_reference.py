@@ -20,8 +20,6 @@ crx_obj = {
         'ext_id',
         'version',
         'last_known_available',  # From dt_avail
-        'downloaded',  # From dt_downloaded # TODO
-        'extracted',  # From dt_extracted # TODO
         'profiled',  # From dt_profiled
     },
     'dt_profiled': {},  # When the profile (centroid) was created
