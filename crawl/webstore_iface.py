@@ -14,7 +14,7 @@ from time import sleep
 from common.util import validate_crx_id, get_crx_version, CRX_URL
 
 __all__ = ['DownloadCRXList', 'save_crx', 'ListDownloadFailedError', 'ExtensionUnavailable', 'BadDownloadURL',
-           'FileExistsError']
+           'FileExistsError', 'VersionExtractError']
 
 LOG_PATH = path.join(path.dirname(path.realpath(__file__)), '../log', 'crx.log')
 DBLING_DIR = path.abspath(path.join(path.dirname(path.realpath(__file__)), '..'))
@@ -44,9 +44,14 @@ class BadDownloadURL(Exception):
     """Raised when the ID is valid but we can't download the extension."""
 
 
+class VersionExtractError(Exception):
+    """Raised when extracting the version number from the URL fails."""
+
+
 class DownloadCRXList:
     # Namespace tag used by the downloaded list (XML file)
     _ns = '{http://www.sitemaps.org/schemas/sitemap/0.9}'
+    local_sitemap = path.join(DBLING_DIR, 'src', 'chrome_sitemap.xml')
 
     def __init__(self, ext_url, session=None):
         """Generate list of extension IDs downloaded from Google.
@@ -63,7 +68,6 @@ class DownloadCRXList:
         self._current_count = 0  # Number of iterations for current run. Reset to 0 by reset_stale()
         self._downloaded_list = False
         self._elm_iter = None
-        self.local_sitemap = path.join(DBLING_DIR, 'src', 'chrome_sitemap.xml')
         self._stale = False  # Prevents fresh download when True
         self.ret_tup = False  # Return a tuple (CRX ID, num)
         self._testing = False
@@ -200,7 +204,11 @@ def save_crx(crx_obj, download_url, save_path=None, session=None):
     # Make the new request to actually download the extension
     resp = _http_get(download_url.format(crx_obj.id), session, stream=True)
 
-    crx_obj.version = get_crx_version(resp.url.rsplit('extension', 1)[-1])
+    try:
+        crx_obj.version = get_crx_version(resp.url.rsplit('extension', 1)[-1])
+    except IndexError:
+        raise VersionExtractError('{}  Problem with extracting CRX version from URL\nURL: {}\nSplit URL: {}'.
+                                  format(crx_obj.id, resp.url, resp.url.rsplit('extension', 1)[-1]))
     crx_obj.filename = '{}_{}.crx'.format(crx_obj.id, crx_obj.version)  # <ID>_<version>
 
     if save_path is None:

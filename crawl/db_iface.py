@@ -54,7 +54,7 @@ def add_new_crx_to_db(crx_obj, log_progress=False):
     :rtype: None
     """
     db_session = DB_SESSION()
-    log = bool(log_progress) and logging.info or logging.debug
+    log = logging.info if bool(log_progress) else logging.debug
 
     try:
         db_session.execute(id_list.insert().values(ext_id=crx_obj['id']))
@@ -84,7 +84,7 @@ def db_download_complete(crx_obj, log_progress=False):
     :rtype: None
     """
     db_session = DB_SESSION()
-    log = bool(log_progress) and logging.info or logging.debug
+    log = logging.info if bool(log_progress) else logging.debug
 
     # Check if the same version is already in the database
     s = select([extension.c.downloaded, extension.c.extracted, extension.c.profiled]).\
@@ -97,7 +97,8 @@ def db_download_complete(crx_obj, log_progress=False):
             values(last_known_available=dict_to_dt(crx_obj.dt_avail))
         db_session.execute(u)
         _commit_it()
-        log('{}  Updated last known available datetime after downloading'.format(crx_obj.id))
+        log('{} [{}/{}]  Updated last known available datetime after downloading'.
+            format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
 
         # If the extension doesn't need any more processing, raise an error that indicates this
         if None not in list(row):
@@ -111,7 +112,7 @@ def db_download_complete(crx_obj, log_progress=False):
                                                      last_known_available=dict_to_dt(crx_obj.dt_avail),
                                                      downloaded=dict_to_dt(crx_obj.dt_downloaded)))
         _commit_it()
-        log('{}  Added new extension entry to DB'.format(crx_obj.id))
+        log('{} [{}/{}]  Added new extension entry to DB'.format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
 
 
 @app.task(base=SqlAlchemyTask)
@@ -131,7 +132,7 @@ def db_extract_complete(crx_obj, log_progress=False):
     :rtype: None
     """
     db_session = DB_SESSION()
-    log = bool(log_progress) and logging.info or logging.debug
+    log = logging.info if bool(log_progress) else logging.debug
 
     u = extension.update().where(and_(extension.c.ext_id == crx_obj.id,
                                       extension.c.version == crx_obj.version)). \
@@ -139,7 +140,7 @@ def db_extract_complete(crx_obj, log_progress=False):
                extracted=dict_to_dt(crx_obj.dt_extracted))
     db_session.execute(u)
     _commit_it()
-    log('{}  Updated DB after extracting extension'.format(crx_obj.id))
+    log('{} [{}/{}]  Updated DB after extracting extension'.format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
 
 
 @app.task(base=SqlAlchemyTask)
@@ -172,7 +173,7 @@ def db_profile_complete(crx_obj, log_progress=False, update_dt_avail=True):
     :rtype: munch.Munch
     """
     db_session = DB_SESSION()
-    log = bool(log_progress) and logging.info or logging.debug
+    log = logging.info if bool(log_progress) else logging.debug
 
     # Store values for update in cent_dict
     crx_obj.cent_dict['ext_id'] = crx_obj.id
@@ -193,7 +194,7 @@ def db_profile_complete(crx_obj, log_progress=False, update_dt_avail=True):
     else:
         crx_obj.msgs.append('*Re-profiled an extension and updated its entry in the DB')
 
-    log('{}  Database entry complete (profile)'.format(crx_obj.id))
+    log('{} [{}/{}]  Database entry complete (profile)'.format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
 
     return crx_obj
 

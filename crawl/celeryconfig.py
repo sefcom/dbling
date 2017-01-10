@@ -39,7 +39,7 @@ SERVER_EMAIL = sender_email_addr
 
 
 # A "beat" service can be started with `celery -A proj beat` that uses the time information to periodically start
-# the specified task. See http://docs.celeryproject.org/en/latest/tutorials/daemonizing.html for infor on daemonizing
+# the specified task. See http://docs.celeryproject.org/en/latest/tutorials/daemonizing.html for info on daemonizing
 # this kind of service.
 CELERYBEAT_SCHEDULE = {
     'download-every-12-hrs': {

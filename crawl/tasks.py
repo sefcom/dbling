@@ -48,6 +48,8 @@ def start_list_download():
       crawl things are. This allows us to do subjective logging (log progress
       only if the job number % 1000 == 0) at higher levels to keep any watching
       users apprised of progress without too many log entries.
+    - `job_ttl`: Total number of CRXs that will be processed; equal to the
+      number of IDs in the downloaded list of extensions.
     """
 
     logging.info('Beginning list download...')
@@ -79,7 +81,7 @@ def start_list_download():
     crx_list.reset_stale(ret_tup=True)
 
     # Send all CRXs to be queued, then summarize results
-    chord((process_crx.s({'id': crx, 'dt_avail': dt_avail, 'msgs': [], 'job_num': num})
+    chord((process_crx.s({'id': crx, 'dt_avail': dt_avail, 'msgs': [], 'job_num': num, 'job_ttl': crx_list.count})
            for crx, num in crx_list), summarize_job.s())()
 
 
@@ -111,8 +113,8 @@ def process_crx(crx_obj):
         if crx_obj.stop_processing:
             break
 
-    log = (not crx_obj.job_num % PROGRESS_PERIOD) and logging.info or logging.debug
-    log('{}  Completed processing CRX'.format(crx_obj.id))
+    log = logging.info if not (crx_obj.job_num % PROGRESS_PERIOD) else logging.debug
+    log('{} [{}/{}]  Completed processing CRX'.format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
 
     return crx_obj.msgs
 
@@ -139,7 +141,7 @@ def download_crx(crx_obj):
     :return: Updated version of `crx_obj`.
     :rtype: munch.Munch
     """
-    logging.debug('{}  Starting download of CRX'.format(crx_obj.id))
+    logging.debug('{} [{}/{}]  Starting download of CRX'.format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
 
     try:
         # Save the CRX, then check if the DB already has this version.
@@ -156,7 +158,8 @@ def download_crx(crx_obj):
     except HTTPError as err:
         # Something bad happened trying to download the actual file. No way to know how to resolve it, so
         # just skip it and move on.
-        logging.warning('%s  Download failed (%s %s)' % (crx_obj.id, err.response.status_code, err.response.reason))
+        logging.warning('{} [{}/{}]  Download failed ({} {})'.format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl,
+                                                                     err.response.status_code, err.response.reason))
         crx_obj.msgs.append('-Got HTTPError error when downloading (non 200 code)')
         crx_obj.stop_processing = True
 
@@ -182,10 +185,11 @@ def download_crx(crx_obj):
         crx_obj.msgs.append('+CRX download completed, but version matched previously downloaded file. '
                             'Profiling old file.')
 
-    except FileNotFoundError:
+    except FileNotFoundError as err:
         # Probably couldn't properly save the file because of some weird characters in the path we tried
         # to save it at. Keep the ID of the CRX so we can try again later.
-        logging.warning('%s  Failed to save CRX' % crx_obj.id, exc_info=1)
+        logging.warning('{} [{}/{}]  Failed to save CRX'.format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl),
+                        exc_info=err)
         crx_obj.msgs.append('-Got FileNotFound error when trying to save the download')
         crx_obj.stop_processing = True
 
@@ -193,12 +197,19 @@ def download_crx(crx_obj):
         # Most likely reasons why this error is raised: 1) the extension is part of an invite-only beta or other
         # restricted distribution, or 2) the extension is listed as being compatible with Chrome OS only.
         # Until we develop a workaround, just skip it.
-        logging.debug('%s  Bad download URL' % crx_obj.id)
+        logging.debug('{} [{}/{}]  Bad download URL'.format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
         crx_obj.msgs.append('-Denied access to download')
         crx_obj.stop_processing = True
 
+    except VersionExtractError as err:
+        logging.warning('{} [{}/{}]  Version number extraction failed'.
+                        format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl), exc_info=err)
+        crx_obj.msgs.append("-Couldn't extract version number")
+        crx_obj.stop_processing = True
+
     except:
-        logging.critical('%s  An unknown error occurred while downloading.' % crx_obj.id, exc_info=1)
+        logging.critical('{} [{}/{}]  An unknown error occurred while downloading'.
+                         format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl), exc_info=1)
         raise
 
     else:
@@ -232,39 +243,42 @@ def extract_crx(crx_obj):
         crx_obj.msgs.append("|Failed to overwrite an existing Zip file, but didn't crash")
 
     except BadCrxHeader:
-        logging.warning('%s  CRX had an invalid header.' % crx_obj.id)
+        logging.warning('{} [{}/{}]  CRX had an invalid header'.format(crx_obj.id, crx_obj.job_number, crx_obj.job_ttl))
         crx_obj.msgs.append('-CRX header failed validation')
         crx_obj.stop_processing = True
 
     except BadZipFile:
-        logging.warning('%s  Failed to unzip file because it isn\'t valid.' % crx_obj.id)
+        logging.warning('{} [{}/{}]  Failed to unzip file because it isn\'t valid'.
+                        format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
         crx_obj.msgs.append('-Zip file failed validation')
         crx_obj.stop_processing = True
 
     except MemoryError:
-        logging.warning('%s  Failed to unzip file because of a memory error.' % crx_obj.id)
+        logging.warning('{} [{}/{}]  Failed to unzip file because of a memory error'.
+                        format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
         crx_obj.msgs.append('-Unpacking Zip file failed due do a MemoryError')
         crx_obj.stop_processing = True
 
     except (IndexError, IsADirectoryError):
-        logging.warning('%s  Failed to unzip file likely because of a member filename error.' % crx_obj.id,
-                        exc_info=1)
+        logging.warning('{} [{}/{}]  Failed to unzip file likely because of a member filename error'.
+                        format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl), exc_info=1)
         crx_obj.msgs.append('-Other error while unzipping file')
         crx_obj.stop_processing = True
 
     except NotADirectoryError:
-        logging.warning('%s  Failed to unzip file because a file was incorrectly listed as a directory.' %
-                        crx_obj.id, exc_info=1)
+        logging.warning('{} [{}/{}]  Failed to unzip file because a file was incorrectly listed as a directory'.
+                        format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl), exc_info=1)
         crx_obj.msgs.append('-Unpacking Zip file failed due to a NotADirectoryError')
         crx_obj.stop_processing = True
 
     except:
-        logging.critical('%s  An unknown error occurred while unpacking.' % crx_obj.id, exc_info=1)
+        logging.critical('{} [{}/{}]  An unknown error occurred while unpacking'.
+                         format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl), exc_info=1)
         raise
 
     else:
         crx_obj.msgs.append('+Unpacked a Zip file')
-        logging.debug('%s  Unpack complete' % crx_obj.id)
+        logging.debug('{} [{}/{}]  Unpack complete'.format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
         crx_obj.extracted_path = extracted_path
         crx_obj.dt_extracted = dt_dict_now()
         db_extract_complete(crx_obj)
@@ -303,7 +317,7 @@ def profile_crx(crx_obj):
     crx_obj.cent_dict = cent_vals_to_dict(cent_vals)
 
     crx_obj.msgs.append('+Extension successfully profiled, centroid calculated')
-    logging.debug('%s  Centroid calculation' % crx_obj.id)
+    logging.debug('{} [{}/{}]  Centroid calculation'.format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
     crx_obj.dt_profiled = dt_dict_now()
 
     return db_profile_complete(crx_obj)
