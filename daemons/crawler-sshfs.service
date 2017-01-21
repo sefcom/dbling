@@ -1,0 +1,19 @@
+[Unit]
+Description=A service to keep the sshfs connection with the dbling crawler master
+After=sshd.service
+Requires=sshd.service
+
+[Service]
+Restart=on-failure
+User=ubuntu
+ExecStartPre=+/bin/sh -c 'if [ -f "/var/lib/dbling/crxs/0" ]; then /bin/fusermount -u /var/lib/dbling; fi'
+ExecStart=/usr/bin/sshfs -f -o ssh_command="ssh -i /home/ubuntu/.ssh/dblings-key" -o cache=no -o allow_other dbling:/var/lib/dbling /var/lib/dbling
+ExecStop=+/bin/fusermount -u /var/lib/dbling
+
+[Install]
+WantedBy=multi-user.target
+
+# Info obtained from the following sites:
+# https://www.freedesktop.org/software/systemd/man/systemd.service.html
+# https://wiki.ubuntu.com/SystemdForUpstartUsers
+# https://www.digitalocean.com/community/questions/convert-run-at-startup-script-from-upstart-to-systemd-for-ubuntu-16

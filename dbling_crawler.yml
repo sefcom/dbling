@@ -1,0 +1,425 @@
+---
+#
+#  Actions common to all dbling crawler nodes
+#
+- hosts: crawlers
+  vars:
+    code_dir: /home/ubuntu/dbling2
+    mgt_ip: 10.90.90.227
+  remote_user: ubuntu
+
+  tasks:
+  - name: ensure rsync is at the latest version
+    apt:
+      name: rsync
+      state: latest
+      cache_valid_time: 600
+    become: yes
+
+  - name: ensure Python3 is at the latest version
+    apt:
+      name: python3
+      state: latest
+      cache_valid_time: 600
+    become: yes
+
+  - name: ensure pip3 is at latest version
+    apt:
+      name: python3-pip
+      state: latest
+      cache_valid_time: 600
+    become: yes
+
+  - name: ensure dbling is listed in /etc/hosts
+    lineinfile:
+      dest: /etc/hosts
+      insertafter: '127\.0\.0\.1'
+      state: present
+      line: '{{ mgt_ip }}  dbling'
+    become: yes
+
+  #
+  #  Graph Tool
+  #
+  - name: add the apt key for graph-tool
+    apt_key:
+      keyserver: pgp.skewed.de
+      id: 612DEFB798507F25
+      state: present
+    become: yes
+
+  - name: add the first repo for graph-tool to apt
+    apt_repository:
+      repo: "deb http://downloads.skewed.de/apt/{{ ansible_lsb.codename }} {{ ansible_lsb.codename }} universe"
+      state: present
+      filename: graph-tool
+      update_cache: no
+    become: yes
+
+  - name: add the second repo for graph-tool to apt
+    apt_repository:
+      repo: "deb-src http://downloads.skewed.de/apt/{{ ansible_lsb.codename }} {{ ansible_lsb.codename }} universe"
+      state: present
+      filename: graph-tool
+      update_cache: yes
+    become: yes
+
+  - name: ensure graph-tool (for Python 3) is at latest version
+    apt:
+      name: python3-graph-tool
+      state: latest
+      cache_valid_time: 600
+    become: yes
+
+  #
+  #  Other Python libraries with special needs
+  #
+  - name: ensure python3-mysql.connector is at latest version
+    apt:
+      name: python3-mysql.connector
+      state: latest
+      cache_valid_time: 600
+    become: yes
+
+  - name: ensure build-essential is at latest version (prereq for Python cryptography lib)
+    apt:
+      name: build-essential
+      state: latest
+      cache_valid_time: 600
+    become: yes
+
+  - name: ensure libssl-dev is at latest version (prereq for Python cryptography lib)
+    apt:
+      name: libssl-dev
+      state: latest
+      cache_valid_time: 600
+    become: yes
+
+  - name: ensure libffi-dev is at latest version (prereq for Python cryptography lib)
+    apt:
+      name: libffi-dev
+      state: latest
+      cache_valid_time: 600
+    become: yes
+
+  - name: ensure python-dev is at latest version (prereq for Python cryptography lib)
+    apt:
+      name: python-dev
+      state: latest
+      cache_valid_time: 600
+    become: yes
+
+  #
+  #  Sync the code, install the libraries it uses
+  #
+  - name: ensure directory for the code exists
+    file:
+      dest: "{{ code_dir }}"
+      state: directory
+
+  - name: ensure directories for extensions exist
+    file:
+      dest: /var/lib/dbling
+      state: directory
+      owner: ubuntu
+      group: ubuntu
+    become: yes
+
+  - name: sync the files in common
+    synchronize:
+      src: common
+      dest: "{{ code_dir }}"
+
+  - name: sync the files in crawl
+    synchronize:
+      src: crawl
+      dest: "{{ code_dir }}"
+
+  - name: sync the files in secret
+    synchronize:
+      src: secret
+      dest: "{{ code_dir }}"
+
+  - name: ensure dir for dbling's logs exists
+    file:
+      dest: "{{ code_dir }}/log"
+      state: directory
+
+  - name: create crx log file that's writable by anyone
+    file:
+      dest: "{{ code_dir }}/log/crx.log"
+      mode: 0666
+      state: touch
+
+  - name: copy python libraries requirements file
+    copy:
+      src: requirements.txt
+      dest: "{{ code_dir }}/requirements.txt"
+
+  - name: install python libraries
+    pip:
+      executable: pip3
+      requirements: "{{ code_dir }}/requirements.txt"
+    become: yes
+
+  #
+  #  Access control stuff
+  #
+  - name: move ssh keys to ~/.ssh then copy pub key to authorized_keys and set proper permissions
+    shell: mv dblings-key dblings-key.pub ~/.ssh/ && cat ~/.ssh/dblings-key.pub >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/dblings-key ~/.ssh/authorized_keys
+    args:
+      chdir: "{{ code_dir }}/secret"
+      creates: ~/.ssh/dblings-key
+
+  - name: Create group "celery", needed by celery init scripts
+    group:
+      name: celery
+      state: present
+    become: yes
+
+  - name: Create user "celery", needed by celery init scripts
+    user:
+      name: celery
+      group: celery
+      state: present
+      createhome: no
+    become: yes
+
+
+
+#
+#  Actions for the crawler master
+#
+- hosts: crawl-masters
+  vars:
+    mysql_rt_pass: 'no way hose head'
+    mysql_dbling_pass: 'no way hose head'
+  remote_user: ubuntu
+
+  handlers:
+  - name: restart rabbitmq-server
+    service: name=rabbitmq-server state=restarted
+    become: yes
+
+  - name: restart mysql
+    service: name=mysql state=restarted
+    become: yes
+
+
+  tasks:
+  #
+  #  MySQL Setup and Configuration
+  #
+  - name: ensure mysql-server is at the latest version
+    apt:
+      name: mysql-server
+      state: latest
+      cache_valid_time: 600
+    become: yes
+
+  - name: ensure mysql-client is at the latest version
+    apt:
+      name: mysql-client
+      state: latest
+      cache_valid_time: 600
+    become: yes
+
+  - name: ensure python-mysqldb is at the latest version
+    apt:
+      name: python-mysqldb
+      state: latest
+      cache_valid_time: 600
+    become: yes
+
+  - name: set root password for MySQL
+    mysql_user:
+      name: root
+      password: '{{ mysql_rt_pass }}'
+
+  - name: drop file with new login for MySQL
+    template:
+      src: daemons/my.cnf
+      dest: ~/.my.cnf
+      mode: 0600
+
+  - name: ensure the `chrome` database exists
+    mysql_db:
+      name: chrome
+      state: present
+
+  - name: set up privileges for user 'dbling_dbusr'@'localhost'
+    mysql_user:
+      name: dbling_dbusr
+      host: localhost
+      password: '{{ mysql_dbling_pass }}'
+      state: present
+      priv: 'chrome.*:SELECT,INSERT,UPDATE,CREATE,ALTER'
+
+  - name: set up privileges for user 'dbling_dbusr'@'10.90.%'
+    mysql_user:
+      name: dbling_dbusr
+      host: '10.90.%'
+      password: '{{ mysql_dbling_pass }}'
+      state: present
+      priv: 'chrome.*:SELECT,INSERT,UPDATE'
+
+  - name: bind MySQL to listen to all incoming connections
+    lineinfile:
+      dest: /etc/mysql/mysql.conf.d/mysqld.cnf
+      state: present
+      line: 'bind-address            = *'
+      regexp: 'bind-address.*'
+    become: yes
+    notify:
+      - restart mysql
+
+  #
+  #  RabbitMQ Setup and Configuration
+  #
+  - name: ensure rabbitmq-server is at the latest version
+    apt:
+      name: rabbitmq-server
+      state: latest
+      cache_valid_time: 600
+    become: yes
+
+  - name: enable RabbitMQ management console
+    command: rabbitmq-plugins enable rabbitmq_management
+    become: yes
+    register: plugin_enabled_output
+
+  - name: Checking if the RabbitMQ management console was already enabled, restarting rabbitmq-server if it wasn't
+    command: echo "RabbitMQ plugins were updated"
+    when: plugin_enabled_output.stdout.find('Plugin configuration has changed') != -1
+    # The above string will appear in the output only when the console wasn't already enabled, so only in that case
+    # do we need to restart RabbitMQ.
+    notify:
+      - restart rabbitmq-server
+
+  - name: ensure celery's default logging directory exists
+    file:
+      dest: /var/log/celery
+      state: directory
+    become: yes
+
+  - name: ensure default logging location is writable by user "celery"
+    file:
+      dest: /var/log/celery/beat.log
+      state: touch
+      mode: 0664
+      group: celery
+    become: yes
+
+  #
+  #  Celery beat service setup and configuration
+  #
+  - name: copy beat daemon script to /etc/init.d/
+    copy:
+      src: daemons/celerybeat
+      dest: /etc/init.d/celerybeat
+      owner: root
+      group: root
+      mode: 0755
+    become: yes
+
+  - name: copy beat daemon config to /etc/default/
+    copy:
+      src: daemons/celerybeat.conf
+      dest: /etc/default/celerybeat
+      owner: root
+      group: root
+      mode: 0644
+    become: yes
+
+  - name: ensure the celerybeat service starts
+    service:
+      name: celerybeat
+      enabled: yes
+      state: started
+    become: yes
+
+
+
+#
+#  Actions for the crawler workers
+#
+- hosts: crawl-workers
+  remote_user: ubuntu
+
+  tasks:
+  - name: ensure sshfs is at latest version
+    apt:
+      name: sshfs
+      state: latest
+      cache_valid_time: 600
+    become: yes
+
+  - name: ensure upstart is at latest version
+    apt:
+      name: upstart
+      state: latest
+      cache_valid_time: 600
+    become: yes
+
+  - name: ensure fuse is at latest version
+    apt:
+      name: fuse
+      state: latest
+      cache_valid_time: 600
+    become: yes
+
+  - name: configure fuse to allow other users to access the remote directory
+    lineinfile:
+      dest: /etc/fuse.conf
+      state: present
+      regexp: '^#?user_allow_other'
+      line: 'user_allow_other'
+    become: yes
+
+  - name: copy sshfs configuration
+    copy:
+      src: daemons/crawler-sshfs.service
+      dest: /etc/systemd/system/crawler-sshfs.service
+      owner: root
+      group: root
+      mode: 0644
+    become: yes
+
+  - name: enable and start sshfs service
+    systemd:
+      daemon_reload: yes
+      name: crawler-sshfs.service
+      enabled: yes
+      state: started
+    become: yes
+
+  - name: ensure celeryd service is stopped so we can copy new versions of its configuration
+    service:
+      name: celeryd
+      state: stopped
+    become: yes
+
+  - name: copy worker daemon script to /etc/init.d/
+    copy:
+      src: daemons/celeryd
+      dest: /etc/init.d/celeryd
+      owner: root
+      group: root
+      mode: 0755
+    become: yes
+
+  - name: copy worker daemon config to /etc/default/
+    copy:
+      src: daemons/celeryd.conf
+      dest: /etc/default/celeryd
+      owner: root
+      group: root
+      mode: 0644
+    become: yes
+
+  - name: ensure celeryd service is started
+    service:
+      name: celeryd
+      enabled: yes
+      state: started
+    become: yes
