@@ -3,18 +3,24 @@
 
 from __future__ import absolute_import
 
+import asyncio
 import logging
-from os import path
-from lxml import etree
-import requests
-from requests.exceptions import ChunkedEncodingError
-from requests import ConnectionError
+from os import path, remove
 from time import sleep
+from urllib.parse import urlparse, parse_qs
 
-from common.util import validate_crx_id, get_crx_version, CRX_URL
+import requests
+import uvloop
+from lxml import etree
+from requests import ConnectionError
+from requests.exceptions import ChunkedEncodingError
+
+from common.util import validate_crx_id, get_crx_version, CRX_URL, make_download_headers
 
 __all__ = ['DownloadCRXList', 'save_crx', 'ListDownloadFailedError', 'ExtensionUnavailable', 'BadDownloadURL',
-           'FileExistsError', 'VersionExtractError']
+           'VersionExtractError']
+
+asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 LOG_PATH = path.join(path.dirname(path.realpath(__file__)), '../log', 'crx.log')
 DBLING_DIR = path.abspath(path.join(path.dirname(path.realpath(__file__)), '..'))
@@ -24,12 +30,6 @@ NUM_HTTP_RETIRES = 5
 
 
 logging.getLogger('requests').setLevel(logging.WARNING)
-
-
-if not hasattr(__builtins__, 'FileExistsError'):
-    # Python 2.7 compatibility
-    class FileExistsError(OSError):
-        """Raised when trying to create a file or directory which already exists. Corresponds to errno EEXIST."""
 
 
 class ListDownloadFailedError(ConnectionError):
@@ -51,73 +51,63 @@ class VersionExtractError(Exception):
 class DownloadCRXList:
     # Namespace tag used by the downloaded list (XML file)
     _ns = '{http://www.sitemaps.org/schemas/sitemap/0.9}'
-    local_sitemap = path.join(DBLING_DIR, 'src', 'chrome_sitemap.xml')
+    sitemap_dir = path.join(DBLING_DIR, 'crawl', 'sitemaps')
+    local_sitemap = path.join(sitemap_dir, 'chrome_sitemap.xml')
 
-    def __init__(self, ext_url, session=None):
+    def __init__(self, ext_url, *, return_count=False, session=None):
         """Generate list of extension IDs downloaded from Google.
 
         :param ext_url: Specially crafted URL that will let us download the
             list of extensions.
         :type ext_url: str
+        :param return_count: When True, will return a tuple of the form:
+            `(crx_id, job_number)`, where `job_number` is the index of the ID
+            plus 1. This way, the job number of the last ID returned will be
+            the same as `len(DownloadCRXList)`.
+        :type return_count: bool
         :param session: Session object to use when downloading the list.
         :type session: requests.Session
         """
         self.ext_url = ext_url
         self.session = session
-        self._count = 0  # Number of extension IDs in the downloaded list
-        self._current_count = 0  # Number of iterations for current run. Reset to 0 by reset_stale()
         self._downloaded_list = False
-        self._elm_iter = None
-        self._stale = False  # Prevents fresh download when True
-        self.ret_tup = False  # Return a tuple (CRX ID, num)
-        self._testing = False
+        self.ret_tup = return_count  # Return a tuple (CRX ID, num)
+        self._id_list = []
+        self._next_id_index = 0
 
     def __iter__(self):
-        if self._testing:
-            # Favor not downloading if we're testing
-            do_download = not (self._stale or self._downloaded_list)
-        else:
-            do_download = not self._stale or not self._downloaded_list
-        if do_download:
-            self.do_download()
-
-        xml_tree_root = etree.parse(self.local_sitemap).getroot()
-
-        # Initialize the iterator from etree
-        self._elm_iter = xml_tree_root.iterfind(self._ns + 'url').__iter__()
+        if not self._downloaded_list:
+            self.download_ids()
+        # Reset the "next ID" index
+        self._next_id_index = 0
         return self
 
     def __next__(self):
-        if not self._downloaded_list or self._elm_iter is None:
-            # This exception should only ever happen if the calling code wasn't using this class as a traditional
-            # generator, i.e. calling the functions directly.
-            raise Exception('You must call __iter__ before calling __next__.')
-
-        if self._testing and self._current_count >= 10:
+        if self._next_id_index >= len(self._id_list) or self._next_id_index > 100:
             raise StopIteration
-        try:
-            url_elm = self._elm_iter.__next__()
-        except StopIteration:
-            # We're getting our data from an iterator, so when it's done, we should be done, signified by raising a
-            # StopIteration exception.
-            logging.debug('Done parsing list of extensions.')
-            raise
-
-        # Count this iteration
-        self._current_count += 1
-        self.count += 1  # Only actually increments if not stale
-
-        # Leverage os.path's basename function to grab the last part of the source URL of the extension
-        crx_id = path.basename(url_elm.findtext(self._ns + 'loc'))[:32]
-
+        crx_id = self._id_list[self._next_id_index]
+        self._next_id_index += 1
         if self.ret_tup:
-            return crx_id, self._current_count
-        else:
-            return crx_id
+            return crx_id, self._next_id_index
+        return crx_id
 
-    def do_download(self):
-        logging.info('Downloading list of extensions from Google.')
-        resp = _http_get(self.ext_url, self.session, stream=False)
+    def download_ids(self):
+        """Starting point for downloading all CRX IDs.
+
+        This function actually creates an event loop and starts the downloads
+        asynchronously.
+
+        :return:
+        """
+        asyncio.get_event_loop().run_until_complete(self._async_download_lists())
+        self._downloaded_list = True
+
+    async def _async_download_lists(self):
+        logging.info('Downloading the list of extension lists from Google.')
+
+        # Download the first list
+        list_list_url = 'https://chrome.google.com/webstore/sitemap'
+        resp = _http_get(list_list_url, self.session, stream=False, headers=make_download_headers())
         if resp is None:
             logging.critical('Failed to download list of extensions.')
             raise ListDownloadFailedError('Unable to download list of extensions.')
@@ -127,34 +117,64 @@ class DownloadCRXList:
             for chunk in resp.iter_content(chunk_size=None):
                 fout.write(chunk)
         del resp
-        self._downloaded_list = True
-        logging.debug('Download finished. Ready to parse the XML and yield extension IDs.')
 
-    def reset_stale(self, ret_tup=False):
-        self._stale = True
-        self._current_count = 0
-        self.ret_tup = bool(ret_tup)
-        return self.__iter__()
+        # Go through the list, extracting list URLs
+        ids = set()
+        xml_tree = etree.parse(self.local_sitemap)
+        for url_tag in xml_tree.iterfind('*/' + self._ns + 'loc'):
+            # Download the URL, get the IDs from it and add them to the set of IDs
+            try:
+                ids |= await self._dl_parse_id_list(url_tag.text)
+            except ListDownloadFailedError:
+                # TODO: How to handle this?
+                raise
 
-    @property
-    def count(self):
-        return self._count
+        # Convert IDs to a list, then sort it
+        self._id_list = list(ids)
+        self._id_list.sort()
 
-    @count.setter
-    def count(self, val):
-        if not self.count_finalized:
-            self._count = val
+    async def _dl_parse_id_list(self, list_url):
+        # Get info from the list URL to indicate our progress in the log message
+        url_data = parse_qs(urlparse(list_url).query)
+        numshards = url_data['numshards'][0]
+        shard = ('{:0' + str(len(numshards)) + '}').format(int(url_data['shard'][0]))
+        _hl = hl = url_data.get('hl', '')
+        if isinstance(_hl, list):
+            hl = ' (language: {})'.format(_hl[0])
+            _hl = '_{}'.format(_hl[0])
+        list_id = '{} of {}{}'.format(shard, numshards, hl)
+        logging.info('Downloading list {} from Google.'.format(list_id))
+        sitemap = path.join(self.sitemap_dir, 'sitemap{}_{}_{}.xml'.format(_hl, shard, numshards))
 
-    @count.deleter
-    def count(self):
-        pass
+        # Download the IDs list
+        resp = _http_get(list_url, self.session, stream=False, headers=make_download_headers())
+        if resp is None:
+            logging.critical('Failed to download list of extensions.')
+            raise ListDownloadFailedError('Unable to download extension list {}.'.format(list_id))
 
-    @property
-    def count_finalized(self):
-        return self._stale
+        # Save the list
+        with open(sitemap, 'wb') as fout:
+            for chunk in resp.iter_content(chunk_size=None):
+                fout.write(chunk)
+        del resp
+
+        # Extract the IDs
+        ids = set()
+        xml_tree = etree.parse(sitemap)
+        for url_tag in xml_tree.iterfind('*/' + self._ns + 'loc'):
+            # Get just the URL path (strips the scheme, netloc, params, query, and fragment segments)
+            crx_id = urlparse(url_tag.text).path
+            # Get the ID (strips everything from the path except the last part)
+            crx_id = path.basename(crx_id)
+            ids.add(crx_id)
+
+        # Delete the list
+        remove(sitemap)
+
+        return ids
 
     def __len__(self):
-        return self.count
+        return len(self._id_list)
 
 
 def save_crx(crx_obj, download_url, save_path=None, session=None):

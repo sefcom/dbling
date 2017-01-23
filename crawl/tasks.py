@@ -55,7 +55,7 @@ def start_list_download():
     logging.info('Beginning list download...')
 
     dt_avail = dt_dict_now()  # All CRXs get the same value because we download the list at one specific time
-    crx_list = DownloadCRXList(_conf['extension_list_url'])
+    crx_list = DownloadCRXList(_conf['extension_list_url'], return_count=True)
 
     # TODO: Delete the next lines for production
     if TESTING:
@@ -64,13 +64,13 @@ def start_list_download():
 
     # Download the list, add each CRX to DB, and keep track of how long it all takes
     t1 = perf_counter()
-    for crx in crx_list:
+    for crx, num in crx_list:
         # We're doing this part synchronously because creating separate tasks for every CRX ID just to add it to the DB
         # create way more overhead than is necessary. Each DB transaction doesn't really incur enough of a performance
         # penalty to justify all the extra time spent sending and managing the messages. The only down sides are that
         # (1) we lose the ability to distribute the work to multiple nodes and (2) if the process is interrupted, then
         # we lose track of our progress.
-        add_new_crx_to_db({'id': crx, 'dt_avail': dt_avail}, TESTING and not crx_list.count % PROGRESS_PERIOD)
+        add_new_crx_to_db({'id': crx, 'dt_avail': dt_avail}, TESTING and not num % PROGRESS_PERIOD)
     ttl_time = str(timedelta(seconds=(perf_counter()-t1)))
 
     # Notify the admins that the download is complete and the list of CRX IDs has been updated
@@ -78,7 +78,7 @@ def start_list_download():
 
     # Force the iterator back to the beginning (not generally good practice, but whatever)
     # This reuses the list downloaded earlier and changes the return value
-    crx_list.reset_stale(ret_tup=True)
+    # crx_list.reset_stale(ret_tup=True)
 
     # Send all CRXs to be queued, then summarize results
     chord((process_crx.s({'id': crx, 'dt_avail': dt_avail, 'msgs': [], 'job_num': num, 'job_ttl': crx_list.count})

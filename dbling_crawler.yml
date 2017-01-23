@@ -116,6 +116,9 @@
     file:
       dest: "{{ code_dir }}"
       state: directory
+      owner: ubuntu
+      group: celery
+    become: yes
 
   - name: ensure directories for extensions exist
     file:
@@ -144,12 +147,23 @@
     file:
       dest: "{{ code_dir }}/log"
       state: directory
+      group: celery
+      owner: ubuntu
+    become: yes
+
+  - name: ensure dir for dbling's sitemaps exists
+    file:
+      dest: "{{ code_dir }}/crawl/sitemaps"
+      state: directory
 
   - name: create crx log file that's writable by anyone
     file:
       dest: "{{ code_dir }}/log/crx.log"
       mode: 0666
       state: touch
+      group: celery
+      owner: ubuntu
+    become: yes
 
   - name: copy python libraries requirements file
     copy:
@@ -195,16 +209,6 @@
     mysql_rt_pass: 'no way hose head'
     mysql_dbling_pass: 'no way hose head'
   remote_user: ubuntu
-
-  handlers:
-  - name: restart rabbitmq-server
-    service: name=rabbitmq-server state=restarted
-    become: yes
-
-  - name: restart mysql
-    service: name=mysql state=restarted
-    become: yes
-
 
   tasks:
   #
@@ -270,8 +274,14 @@
       line: 'bind-address            = *'
       regexp: 'bind-address.*'
     become: yes
-    notify:
-      - restart mysql
+    register: mysql_conf_changed
+
+  - name: restart mysql if the configuration made any changes
+    service:
+      name: mysql
+      state: restarted
+    when: mysql_conf_changed.changed
+    become: yes
 
   #
   #  RabbitMQ Setup and Configuration
@@ -289,12 +299,12 @@
     register: plugin_enabled_output
 
   - name: Checking if the RabbitMQ management console was already enabled, restarting rabbitmq-server if it wasn't
-    command: echo "RabbitMQ plugins were updated"
+    service:
+      name: rabbitmq-server
+      state: restarted
     when: plugin_enabled_output.stdout.find('Plugin configuration has changed') != -1
     # The above string will appear in the output only when the console wasn't already enabled, so only in that case
     # do we need to restart RabbitMQ.
-    notify:
-      - restart rabbitmq-server
 
   - name: ensure celery's default logging directory exists
     file:
@@ -313,6 +323,17 @@
   #
   #  Celery beat service setup and configuration
   #
+  - name: check if celerybeat service already exists
+    shell: service --status-all | grep celerybeat
+    register: celerybeat_check
+
+  - name: ensure celerybeat service is stopped so we can copy new versions of its configuration
+    service:
+      name: celerybeat
+      state: stopped
+    when: celerybeat_check.stdout.find('celery') != -1
+    become: yes
+
   - name: copy beat daemon script to /etc/init.d/
     copy:
       src: daemons/celerybeat
@@ -329,6 +350,10 @@
       owner: root
       group: root
       mode: 0644
+    become: yes
+
+  - name: reload systemctl units
+    command: systemctl daemon-reload
     become: yes
 
   - name: ensure the celerybeat service starts
@@ -393,10 +418,15 @@
       state: started
     become: yes
 
+  - name: check if celeryd service already exists
+    shell: service --status-all | grep celeryd
+    register: celeryd_check
+
   - name: ensure celeryd service is stopped so we can copy new versions of its configuration
     service:
       name: celeryd
       state: stopped
+    when: celeryd_check.stdout.find('celery') != -1
     become: yes
 
   - name: copy worker daemon script to /etc/init.d/

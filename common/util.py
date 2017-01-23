@@ -336,6 +336,14 @@ def calc_chrome_version(last_version, release_date, release_period=10):
     return str(float(last_version) + td)
 
 
+def make_download_headers():
+    # TODO: Make this actually generate a random user-agent string
+    head = {'Upgrade-Insecure-Requests': '1',
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.87 '
+                          'Safari/537.36'}
+    return head
+
+
 def dt_dict_now():
     now = datetime.today()
     val = {'year': now.year,
