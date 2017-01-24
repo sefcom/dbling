@@ -9,9 +9,21 @@
   remote_user: ubuntu
 
   tasks:
+  - name: update apt's cache
+    apt:
+      update_cache: yes
+    become: yes
+
   - name: ensure rsync is at the latest version
     apt:
       name: rsync
+      state: latest
+      cache_valid_time: 600
+    become: yes
+
+  - name: ensure sendmail is at latest version (required for email reports)
+    apt:
+      name: sendmail
       state: latest
       cache_valid_time: 600
     become: yes
@@ -30,12 +42,29 @@
       cache_valid_time: 600
     become: yes
 
+  #
+  #  Access control stuff 1
+  #
   - name: ensure dbling is listed in /etc/hosts
     lineinfile:
       dest: /etc/hosts
       insertafter: '127\.0\.0\.1'
       state: present
       line: '{{ mgt_ip }}  dbling'
+    become: yes
+
+  - name: Create group "celery", needed by celery init scripts
+    group:
+      name: celery
+      state: present
+    become: yes
+
+  - name: Create user "celery", needed by celery init scripts
+    user:
+      name: celery
+      group: celery
+      state: present
+      createhome: no
     become: yes
 
   #
@@ -132,16 +161,19 @@
     synchronize:
       src: common
       dest: "{{ code_dir }}"
+    register: sync_common
 
   - name: sync the files in crawl
     synchronize:
       src: crawl
       dest: "{{ code_dir }}"
+    register: sync_crawl
 
   - name: sync the files in secret
     synchronize:
       src: secret
       dest: "{{ code_dir }}"
+    register: sync_secret
 
   - name: ensure dir for dbling's logs exists
     file:
@@ -151,16 +183,20 @@
       owner: ubuntu
     become: yes
 
+  - name: create crx log file that's writable by celery user
+    copy:
+      dest: "{{ code_dir }}/log/crx.log"
+      content: ""
+      force: no
+      group: celery
+      owner: ubuntu
+      mode: 664
+    become: yes
+
   - name: ensure dir for dbling's sitemaps exists
     file:
       dest: "{{ code_dir }}/crawl/sitemaps"
       state: directory
-
-  - name: create crx log file that's writable by anyone
-    file:
-      dest: "{{ code_dir }}/log/crx.log"
-      mode: 0666
-      state: touch
       group: celery
       owner: ubuntu
     become: yes
@@ -169,6 +205,7 @@
     copy:
       src: requirements.txt
       dest: "{{ code_dir }}/requirements.txt"
+    register: sync_reqs
 
   - name: install python libraries
     pip:
@@ -177,27 +214,13 @@
     become: yes
 
   #
-  #  Access control stuff
+  #  Access control stuff 2
   #
   - name: move ssh keys to ~/.ssh then copy pub key to authorized_keys and set proper permissions
     shell: mv dblings-key dblings-key.pub ~/.ssh/ && cat ~/.ssh/dblings-key.pub >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/dblings-key ~/.ssh/authorized_keys
     args:
       chdir: "{{ code_dir }}/secret"
       creates: ~/.ssh/dblings-key
-
-  - name: Create group "celery", needed by celery init scripts
-    group:
-      name: celery
-      state: present
-    become: yes
-
-  - name: Create user "celery", needed by celery init scripts
-    user:
-      name: celery
-      group: celery
-      state: present
-      createhome: no
-    become: yes
 
 
 
@@ -228,9 +251,9 @@
       cache_valid_time: 600
     become: yes
 
-  - name: ensure python-mysqldb is at the latest version
+  - name: ensure python3-mysqldb is at the latest version
     apt:
-      name: python-mysqldb
+      name: python3-mysqldb
       state: latest
       cache_valid_time: 600
     become: yes
@@ -250,6 +273,7 @@
     mysql_db:
       name: chrome
       state: present
+    register: db_chrome
 
   - name: set up privileges for user 'dbling_dbusr'@'localhost'
     mysql_user:
@@ -258,6 +282,7 @@
       password: '{{ mysql_dbling_pass }}'
       state: present
       priv: 'chrome.*:SELECT,INSERT,UPDATE,CREATE,ALTER'
+    register: db_perm_local
 
   - name: set up privileges for user 'dbling_dbusr'@'10.90.%'
     mysql_user:
@@ -266,6 +291,7 @@
       password: '{{ mysql_dbling_pass }}'
       state: present
       priv: 'chrome.*:SELECT,INSERT,UPDATE'
+    register: db_perm_remote
 
   - name: bind MySQL to listen to all incoming connections
     lineinfile:
@@ -280,7 +306,7 @@
     service:
       name: mysql
       state: restarted
-    when: mysql_conf_changed.changed
+    when: db_chrome.changed or db_perm_local.changed or db_perm_remote.changed or mysql_conf_changed.changed
     become: yes
 
   #
@@ -306,33 +332,12 @@
     # The above string will appear in the output only when the console wasn't already enabled, so only in that case
     # do we need to restart RabbitMQ.
 
-  - name: ensure celery's default logging directory exists
-    file:
-      dest: /var/log/celery
-      state: directory
-    become: yes
-
-  - name: ensure default logging location is writable by user "celery"
-    file:
-      dest: /var/log/celery/beat.log
-      state: touch
-      mode: 0664
-      group: celery
-    become: yes
-
   #
   #  Celery beat service setup and configuration
   #
   - name: check if celerybeat service already exists
-    shell: service --status-all | grep celerybeat
+    shell: service --status-all | grep celerybeat || echo ""
     register: celerybeat_check
-
-  - name: ensure celerybeat service is stopped so we can copy new versions of its configuration
-    service:
-      name: celerybeat
-      state: stopped
-    when: celerybeat_check.stdout.find('celery') != -1
-    become: yes
 
   - name: copy beat daemon script to /etc/init.d/
     copy:
@@ -342,6 +347,7 @@
       group: root
       mode: 0755
     become: yes
+    register: sync_celerybeat_d
 
   - name: copy beat daemon config to /etc/default/
     copy:
@@ -351,10 +357,23 @@
       group: root
       mode: 0644
     become: yes
+    register: sync_celerybeat_conf
 
   - name: reload systemctl units
     command: systemctl daemon-reload
     become: yes
+    when: sync_celerybeat_d.changed or sync_celerybeat_conf.changed or sync_common.changed or sync_crawl.changed or
+          sync_secret.changed or sync_reqs.changed
+    register: service_systemctl_restarted
+
+  - name: restart celerybeat if the configuration changed (service already exists)
+    service:
+      name: celerybeat
+      enabled: yes
+      state: restarted
+    become: yes
+    when: service_systemctl_restarted.changed and celerybeat_check.stdout.find('celery') != -1
+    register: service_celerybeat_restarted
 
   - name: ensure the celerybeat service starts
     service:
@@ -362,6 +381,7 @@
       enabled: yes
       state: started
     become: yes
+    when: not service_celerybeat_restarted.changed
 
 
 
@@ -419,15 +439,8 @@
     become: yes
 
   - name: check if celeryd service already exists
-    shell: service --status-all | grep celeryd
+    shell: service --status-all | grep celeryd || echo ""
     register: celeryd_check
-
-  - name: ensure celeryd service is stopped so we can copy new versions of its configuration
-    service:
-      name: celeryd
-      state: stopped
-    when: celeryd_check.stdout.find('celery') != -1
-    become: yes
 
   - name: copy worker daemon script to /etc/init.d/
     copy:
@@ -437,6 +450,7 @@
       group: root
       mode: 0755
     become: yes
+    register: sync_celery_d
 
   - name: copy worker daemon config to /etc/default/
     copy:
@@ -446,6 +460,16 @@
       group: root
       mode: 0644
     become: yes
+    register: sync_celery_conf
+
+  - name: restart celeryd if configurations or files changed (service already exists)
+    service:
+      name: celeryd
+      state: restarted
+    become: yes
+    when: (sync_celery_d.changed or sync_celery_conf.changed or sync_common.changed or sync_crawl.changed or
+           sync_secret.changed or sync_reqs.changed) and celeryd_check.stdout.find('celery') != -1
+    register: service_celeryd
 
   - name: ensure celeryd service is started
     service:
@@ -453,3 +477,4 @@
       enabled: yes
       state: started
     become: yes
+    when: not service_celeryd.changed

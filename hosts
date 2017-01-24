@@ -1,0 +1,15 @@
+[crawl-masters]
+dbling-master  ansible_host=10.90.90.227
+
+[crawl-workers]
+dbling-wk      ansible_host=10.90.128.33
+dbling-wk2     ansible_host=10.90.128.36
+
+[crawlers:children]
+crawl-masters
+crawl-workers
+
+[crawlers:vars]
+ansible_connection=ssh
+ansible_user=ubuntu
+ansible_python_interpreter=/usr/bin/python3

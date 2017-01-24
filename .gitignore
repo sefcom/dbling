@@ -8,3 +8,4 @@ src/chrome_ext.db
 secret/
 .vagrant/
 *.bak
+*.retry

@@ -26,7 +26,7 @@ DOWNLOAD_URL = _conf['url'].format(CHROME_VERSION, '{}')
 TESTING = READ_ONLY
 
 
-@app.task
+@app.task(send_error_emails=True)
 def start_list_download():
     """Download list of current CRXs from Google, start profiling each one.
 
@@ -57,10 +57,8 @@ def start_list_download():
     dt_avail = dt_dict_now()  # All CRXs get the same value because we download the list at one specific time
     crx_list = DownloadCRXList(_conf['extension_list_url'], return_count=True)
 
-    # TODO: Delete the next lines for production
     if TESTING:
-        crx_list._downloaded_list = True
-        crx_list._testing = True
+        logging.warning('TESTING MODE: All DB transactions will be rolled back, NOT COMMITTED.')
 
     # Download the list, add each CRX to DB, and keep track of how long it all takes
     t1 = perf_counter()
@@ -74,14 +72,15 @@ def start_list_download():
     ttl_time = str(timedelta(seconds=(perf_counter()-t1)))
 
     # Notify the admins that the download is complete and the list of CRX IDs has been updated
-    email_list_update_summary.delay(crx_list.count, ttl_time)
+    email_list_update_summary.delay(len(crx_list), ttl_time)
 
     # Force the iterator back to the beginning (not generally good practice, but whatever)
     # This reuses the list downloaded earlier and changes the return value
     # crx_list.reset_stale(ret_tup=True)
 
     # Send all CRXs to be queued, then summarize results
-    chord((process_crx.s({'id': crx, 'dt_avail': dt_avail, 'msgs': [], 'job_num': num, 'job_ttl': crx_list.count})
+    logging.info('Starting extension download/extract/profile process...')
+    chord((process_crx.s({'id': crx, 'dt_avail': dt_avail, 'msgs': [], 'job_num': num, 'job_ttl': len(crx_list)})
            for crx, num in crx_list), summarize_job.s())()
 
 

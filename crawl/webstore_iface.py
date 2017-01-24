@@ -99,7 +99,8 @@ class DownloadCRXList:
 
         :return:
         """
-        asyncio.get_event_loop().run_until_complete(self._async_download_lists())
+        loop = asyncio.get_event_loop_policy().new_event_loop()
+        loop.run_until_complete(self._async_download_lists())
         self._downloaded_list = True
 
     async def _async_download_lists(self):
@@ -129,6 +130,9 @@ class DownloadCRXList:
                 # TODO: How to handle this?
                 raise
 
+        # Delete the list
+        remove(self.local_sitemap)
+
         # Convert IDs to a list, then sort it
         self._id_list = list(ids)
         self._id_list.sort()
@@ -137,13 +141,14 @@ class DownloadCRXList:
         # Get info from the list URL to indicate our progress in the log message
         url_data = parse_qs(urlparse(list_url).query)
         numshards = url_data['numshards'][0]
-        shard = ('{:0' + str(len(numshards)) + '}').format(int(url_data['shard'][0]))
+        shard = int(url_data['shard'][0]) + 1
+        log = logging.info if not shard % 100 or shard == int(numshards) else logging.debug
+        shard = ('{:0' + str(len(numshards)) + '}').format(shard)
         _hl = hl = url_data.get('hl', '')
         if isinstance(_hl, list):
             hl = ' (language: {})'.format(_hl[0])
             _hl = '_{}'.format(_hl[0])
         list_id = '{} of {}{}'.format(shard, numshards, hl)
-        logging.info('Downloading list {} from Google.'.format(list_id))
         sitemap = path.join(self.sitemap_dir, 'sitemap{}_{}_{}.xml'.format(_hl, shard, numshards))
 
         # Download the IDs list
@@ -167,6 +172,7 @@ class DownloadCRXList:
             # Get the ID (strips everything from the path except the last part)
             crx_id = path.basename(crx_id)
             ids.add(crx_id)
+        log('Downloaded extension list {}. Qty: {}'.format(list_id, len(ids)))
 
         # Delete the list
         remove(sitemap)
