@@ -5,8 +5,8 @@ from secret.creds import crx_save_path, crx_extract_path, db_info
 __all__ = ['conf']
 
 conf = {
-  "version": "54.0",
-  "release_date": [2016, 10, 12],
+  "version": "57.0",
+  "release_date": [2017, 3, 9],  # See https://en.wikipedia.org/wiki/Google_Chrome_version_history
   "url": "https://clients2.google.com/service/update2/crx?response=redirect&prodversion={}&x=id%3D{}%26installsource%3Dondemand%26uc",
   "extension_list_url": "https://chrome.google.com/webstore/sitemap?shard=0&numshards=1",
   "save_path": crx_save_path,
