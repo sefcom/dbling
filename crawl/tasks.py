@@ -62,14 +62,22 @@ def start_list_download():
 
     # Download the list, add each CRX to DB, and keep track of how long it all takes
     t1 = perf_counter()
+    list_count = 0
     for crx, num in crx_list:
         # We're doing this part synchronously because creating separate tasks for every CRX ID just to add it to the DB
         # create way more overhead than is necessary. Each DB transaction doesn't really incur enough of a performance
         # penalty to justify all the extra time spent sending and managing the messages. The only down sides are that
         # (1) we lose the ability to distribute the work to multiple nodes and (2) if the process is interrupted, then
         # we lose track of our progress.
+        list_count += 1
         add_new_crx_to_db({'id': crx, 'dt_avail': dt_avail}, TESTING and not num % PROGRESS_PERIOD)
     ttl_time = str(timedelta(seconds=(perf_counter()-t1)))
+
+    if list_count != len(crx_list):
+        msg = 'Counts of CRXs don\'t match. Downloader reported {} but processed {}.'.format(len(crx_list), list_count)
+        logging.critical(msg)
+        app.mail_admins('dbling: Problem encountered while downloading lists', msg)
+        return
 
     # Notify the admins that the download is complete and the list of CRX IDs has been updated
     email_list_update_summary.delay(len(crx_list), ttl_time)
@@ -79,7 +87,7 @@ def start_list_download():
     # crx_list.reset_stale(ret_tup=True)
 
     # Send all CRXs to be queued, then summarize results
-    logging.info('Starting extension download/extract/profile process...')
+    logging.info('Starting extension download/extract/profile process. There are {} total IDs.'.format(len(crx_list)))
     chord((process_crx.s({'id': crx, 'dt_avail': dt_avail, 'msgs': [], 'job_num': num, 'job_ttl': len(crx_list)})
            for crx, num in crx_list), summarize_job.s())()
 
@@ -202,7 +210,8 @@ def download_crx(crx_obj):
 
     except VersionExtractError as err:
         logging.warning('{} [{}/{}]  Version number extraction failed'.
-                        format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl), exc_info=err)
+                        format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
+        logging.debug('{}  Additional info about version number extraction error:\n'.format(crx_obj.id), exc_info=err)
         crx_obj.msgs.append("-Couldn't extract version number")
         crx_obj.stop_processing = True
 

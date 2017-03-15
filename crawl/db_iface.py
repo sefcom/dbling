@@ -3,10 +3,11 @@
 from __future__ import absolute_import
 
 import logging
+from time import sleep
 
 from celery import Task
 from sqlalchemy import select, and_
-from sqlalchemy.exc import IntegrityError, InvalidRequestError
+from sqlalchemy.exc import IntegrityError, InvalidRequestError, DatabaseError
 from sqlalchemy.orm import scoped_session, sessionmaker
 
 from common.chrome_db import DB_ENGINE, extension, id_list
@@ -17,6 +18,7 @@ __all__ = ['add_new_crx_to_db', 'db_download_complete', 'db_extract_complete', '
            'DuplicateDownload', 'SqlAlchemyTask', 'READ_ONLY']
 
 DB_SESSION = scoped_session(sessionmaker(autocommit=False, autoflush=False, bind=DB_ENGINE))
+MAX_EXECUTE_RETRIES = 20
 READ_ONLY = False
 
 
@@ -87,7 +89,7 @@ def db_download_complete(crx_obj, log_progress=False):
     log = logging.info if bool(log_progress) else logging.debug
 
     # Check if the same version is already in the database
-    s = select([extension.c.downloaded, extension.c.extracted, extension.c.profiled]).\
+    s = select([extension.c.downloaded, extension.c.extracted, extension.c.profiled]). \
         where(and_(extension.c.ext_id == crx_obj.id, extension.c.version == crx_obj.version))
     row = db_session.execute(s).fetchone()
     if row:
@@ -95,8 +97,7 @@ def db_download_complete(crx_obj, log_progress=False):
         u = extension.update().where(and_(extension.c.ext_id == crx_obj.id,
                                           extension.c.version == crx_obj.version)). \
             values(last_known_available=dict_to_dt(crx_obj.dt_avail))
-        db_session.execute(u)
-        _commit_it()
+        _execute_and_commit(db_session, u)
         log('{} [{}/{}]  Updated last known available datetime after downloading'.
             format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
 
@@ -107,11 +108,11 @@ def db_download_complete(crx_obj, log_progress=False):
             raise DuplicateDownload
     else:
         # Add a new entry to the DB
-        db_session.execute(extension.insert().values(ext_id=crx_obj.id,
-                                                     version=crx_obj.version,
-                                                     last_known_available=dict_to_dt(crx_obj.dt_avail),
-                                                     downloaded=dict_to_dt(crx_obj.dt_downloaded)))
-        _commit_it()
+        new_row = extension.insert().values(ext_id=crx_obj.id,
+                                            version=crx_obj.version,
+                                            last_known_available=dict_to_dt(crx_obj.dt_avail),
+                                            downloaded=dict_to_dt(crx_obj.dt_downloaded))
+        _execute_and_commit(db_session, new_row)
         log('{} [{}/{}]  Added new extension entry to DB'.format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
 
 
@@ -138,8 +139,7 @@ def db_extract_complete(crx_obj, log_progress=False):
                                       extension.c.version == crx_obj.version)). \
         values(last_known_available=dict_to_dt(crx_obj.dt_avail),
                extracted=dict_to_dt(crx_obj.dt_extracted))
-    db_session.execute(u)
-    _commit_it()
+    _execute_and_commit(db_session, u)
     log('{} [{}/{}]  Updated DB after extracting extension'.format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
 
 
@@ -183,10 +183,9 @@ def db_profile_complete(crx_obj, log_progress=False, update_dt_avail=True):
         crx_obj.cent_dict['last_known_available'] = dict_to_dt(crx_obj.dt_avail)
 
     # Update the DB with values from cent_dict
-    u = extension.update().where(and_(extension.c.ext_id == crx_obj.id, extension.c.version == crx_obj.version)).\
+    u = extension.update().where(and_(extension.c.ext_id == crx_obj.id, extension.c.version == crx_obj.version)). \
         values(crx_obj.cent_dict)
-    db_session.execute(u)
-    _commit_it()
+    _execute_and_commit(db_session, u)
 
     # Create a stats message indicating what happened
     if update_dt_avail:
@@ -199,9 +198,25 @@ def db_profile_complete(crx_obj, log_progress=False, update_dt_avail=True):
     return crx_obj
 
 
-def _commit_it():
+def _execute_and_commit(db_session, query):
+    i = 0
+    while True:
+        try:
+            db_session.execute(query)
+        except DatabaseError:
+            i += 1
+            if i > MAX_EXECUTE_RETRIES:
+                raise
+            sleep(2 * i)
+        else:
+            _commit_it(db_session)
+            return
+
+
+def _commit_it(db_session=None):
     """Commit pending transactions if not running in READ_ONLY mode."""
-    db_session = DB_SESSION()
+    if db_session is None:
+        db_session = DB_SESSION()
     try:
         if READ_ONLY:
             db_session.rollback()

@@ -5,6 +5,7 @@ from __future__ import absolute_import
 
 import asyncio
 import logging
+from glob import glob
 from os import path, remove
 from time import sleep
 from urllib.parse import urlparse, parse_qs
@@ -13,7 +14,7 @@ import requests
 import uvloop
 from lxml import etree
 from requests import ConnectionError
-from requests.exceptions import ChunkedEncodingError
+from requests.exceptions import ChunkedEncodingError, HTTPError
 
 from common.util import validate_crx_id, get_crx_version, CRX_URL, make_download_headers
 
@@ -83,13 +84,13 @@ class DownloadCRXList:
         return self
 
     def __next__(self):
-        if self._next_id_index >= len(self._id_list) or self._next_id_index > 100:
+        try:
+            crx_id = self._id_list[self._next_id_index]
+        except IndexError:
             raise StopIteration
-        crx_id = self._id_list[self._next_id_index]
+
         self._next_id_index += 1
-        if self.ret_tup:
-            return crx_id, self._next_id_index
-        return crx_id
+        return crx_id, self._next_id_index if self.ret_tup else crx_id
 
     def download_ids(self):
         """Starting point for downloading all CRX IDs.
@@ -104,6 +105,10 @@ class DownloadCRXList:
         self._downloaded_list = True
 
     async def _async_download_lists(self):
+        """Download, loop through the list of lists, combine IDs from each.
+
+        :rtype: None
+        """
         logging.info('Downloading the list of extension lists from Google.')
 
         # Download the first list
@@ -122,6 +127,7 @@ class DownloadCRXList:
         # Go through the list, extracting list URLs
         ids = set()
         xml_tree = etree.parse(self.local_sitemap)
+        num_lists = 0
         for url_tag in xml_tree.iterfind('*/' + self._ns + 'loc'):
             # Download the URL, get the IDs from it and add them to the set of IDs
             try:
@@ -129,15 +135,27 @@ class DownloadCRXList:
             except ListDownloadFailedError:
                 # TODO: How to handle this?
                 raise
+            num_lists += 1
+        duplicate_count = len(ids)
 
-        # Delete the list
-        remove(self.local_sitemap)
+        logging.info('Done downloading. Doing some cleanup...')
+
+        # Delete all the lists
+        [remove(x) for x in glob(path.join(self.sitemap_dir, '*.xml'))]
 
         # Convert IDs to a list, then sort it
         self._id_list = list(ids)
         self._id_list.sort()
 
+        logging.info('There were {} duplicate IDs from the {} lists.'.format(duplicate_count - len(self), num_lists))
+
     async def _dl_parse_id_list(self, list_url):
+        """Download the extension list at the given URL, return set of IDs.
+
+        :param str list_url: URL of an individual extension list.
+        :return: Set of CRX IDs.
+        :rtype: set
+        """
         # Get info from the list URL to indicate our progress in the log message
         url_data = parse_qs(urlparse(list_url).query)
         numshards = url_data['numshards'][0]
@@ -154,8 +172,9 @@ class DownloadCRXList:
         # Download the IDs list
         resp = _http_get(list_url, self.session, stream=False, headers=make_download_headers())
         if resp is None:
-            logging.critical('Failed to download list of extensions.')
-            raise ListDownloadFailedError('Unable to download extension list {}.'.format(list_id))
+            msg = 'Failed to download extension list {}.'.format(list_id)
+            logging.critical(msg)
+            raise ListDownloadFailedError(msg)
 
         # Save the list
         with open(sitemap, 'wb') as fout:
@@ -173,9 +192,6 @@ class DownloadCRXList:
             crx_id = path.basename(crx_id)
             ids.add(crx_id)
         log('Downloaded extension list {}. Qty: {}'.format(list_id, len(ids)))
-
-        # Delete the list
-        remove(sitemap)
 
         return ids
 
@@ -233,7 +249,7 @@ def save_crx(crx_obj, download_url, save_path=None, session=None):
     try:
         crx_obj.version = get_crx_version(resp.url.rsplit('extension', 1)[-1])
     except IndexError:
-        raise VersionExtractError('{}  Problem with extracting CRX version from URL\nURL: {}\nSplit URL: {}'.
+        raise VersionExtractError('{}  Problem with extracting CRX version from URL\n  URL: {}\n  Split URL: {}'.
                                   format(crx_obj.id, resp.url, resp.url.rsplit('extension', 1)[-1]))
     crx_obj.filename = '{}_{}.crx'.format(crx_obj.id, crx_obj.version)  # <ID>_<version>
 
@@ -280,11 +296,14 @@ class RetryRequest:
         for i in range(NUM_HTTP_RETIRES):
             try:
                 resp = self.f(*args, **kwargs)
-            except (ChunkedEncodingError, ConnectionError):
+                resp.raise_for_status()  # If there was an HTTP error, raise it
+            except (ChunkedEncodingError, ConnectionError, HTTPError):
+                # TODO: Are there other errors we could get that we want to retry after?
+                logging.debug('Encountered error while downloading. Attempting to sleep and retry ({} of {} retries)'.
+                              format(i+1, NUM_HTTP_RETIRES))
                 sleep(10 * (i+1))
             else:
                 break
-        resp.raise_for_status()  # If there was an HTTP error, raise it
         return resp
 
 
