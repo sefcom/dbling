@@ -7,7 +7,7 @@ Requires=sshd.service
 Restart=on-failure
 User=ubuntu
 ExecStartPre=+/bin/sh -c 'if [ -f "/var/lib/dbling/crxs/0" ]; then /bin/fusermount -u /var/lib/dbling; fi'
-ExecStart=/usr/bin/sshfs -f -o ssh_command="ssh -i /home/ubuntu/.ssh/dblings-key" -o cache=no -o allow_other dbling:/var/lib/dbling /var/lib/dbling
+ExecStart=/usr/bin/sshfs -f -o ssh_command="ssh -i /home/ubuntu/.ssh/dblings-key -o StrictHostKeyChecking=no" -o cache=no -o allow_other dbling:/var/lib/dbling /var/lib/dbling
 ExecStop=+/bin/fusermount -u /var/lib/dbling
 
 [Install]

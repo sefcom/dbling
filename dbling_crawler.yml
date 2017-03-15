@@ -222,6 +222,12 @@
       chdir: "{{ code_dir }}/secret"
       creates: ~/.ssh/dblings-key
 
+  - name: Empty the known_hosts file
+    copy:
+      dest: /home/ubuntu/.ssh/known_hosts
+      content: ""
+      mode: 0600
+
 
 
 #
