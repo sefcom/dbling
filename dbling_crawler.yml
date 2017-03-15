@@ -9,37 +9,53 @@
   remote_user: ubuntu
 
   tasks:
+  #
+  #  Graph Tool Repos
+  #
+  - name: add the apt key for graph-tool
+    apt_key:
+      keyserver: pgp.skewed.de
+      id: 612DEFB798507F25
+      state: present
+    become: yes
+
+  - name: add the first repo for graph-tool to apt
+    apt_repository:
+      repo: "deb http://downloads.skewed.de/apt/{{ ansible_lsb.codename }} {{ ansible_lsb.codename }} universe"
+      state: present
+      filename: graph-tool
+      update_cache: no
+    become: yes
+
+  - name: add the second repo for graph-tool to apt
+    apt_repository:
+      repo: "deb-src http://downloads.skewed.de/apt/{{ ansible_lsb.codename }} {{ ansible_lsb.codename }} universe"
+      state: present
+      filename: graph-tool
+      update_cache: no
+    become: yes
+
+  #
+  #  General package installation
+  #
   - name: update apt's cache
     apt:
       update_cache: yes
     become: yes
 
-  - name: ensure rsync is at the latest version
-    apt:
-      name: rsync
-      state: latest
-      cache_valid_time: 600
-    become: yes
-
-  - name: ensure sendmail is at latest version (required for email reports)
-    apt:
-      name: sendmail
-      state: latest
-      cache_valid_time: 600
-    become: yes
-
-  - name: ensure Python3 is at the latest version
-    apt:
-      name: python3
-      state: latest
-      cache_valid_time: 600
-    become: yes
-
-  - name: ensure pip3 is at latest version
-    apt:
-      name: python3-pip
-      state: latest
-      cache_valid_time: 600
+  - name: ensure required packages are at the latest version
+    apt: name={{ item }} state=latest cache_valid_time=600
+    with_items:
+      - rsync
+      - sendmail  # Required for email reports
+      - python3
+      - python3-pip
+      - python3-mysql.connector
+      - build-essential  # prereq for Python cryptography lib
+      - libssl-dev  # prereq for Python cryptography lib
+      - libffi-dev  # prereq for Python cryptography lib
+      - python-dev  # prereq for Python cryptography lib
+      - python3-graph-tool
     become: yes
 
   #
@@ -65,77 +81,6 @@
       group: celery
       state: present
       createhome: no
-    become: yes
-
-  #
-  #  Graph Tool
-  #
-  - name: add the apt key for graph-tool
-    apt_key:
-      keyserver: pgp.skewed.de
-      id: 612DEFB798507F25
-      state: present
-    become: yes
-
-  - name: add the first repo for graph-tool to apt
-    apt_repository:
-      repo: "deb http://downloads.skewed.de/apt/{{ ansible_lsb.codename }} {{ ansible_lsb.codename }} universe"
-      state: present
-      filename: graph-tool
-      update_cache: no
-    become: yes
-
-  - name: add the second repo for graph-tool to apt
-    apt_repository:
-      repo: "deb-src http://downloads.skewed.de/apt/{{ ansible_lsb.codename }} {{ ansible_lsb.codename }} universe"
-      state: present
-      filename: graph-tool
-      update_cache: yes
-    become: yes
-
-  - name: ensure graph-tool (for Python 3) is at latest version
-    apt:
-      name: python3-graph-tool
-      state: latest
-      cache_valid_time: 600
-    become: yes
-
-  #
-  #  Other Python libraries with special needs
-  #
-  - name: ensure python3-mysql.connector is at latest version
-    apt:
-      name: python3-mysql.connector
-      state: latest
-      cache_valid_time: 600
-    become: yes
-
-  - name: ensure build-essential is at latest version (prereq for Python cryptography lib)
-    apt:
-      name: build-essential
-      state: latest
-      cache_valid_time: 600
-    become: yes
-
-  - name: ensure libssl-dev is at latest version (prereq for Python cryptography lib)
-    apt:
-      name: libssl-dev
-      state: latest
-      cache_valid_time: 600
-    become: yes
-
-  - name: ensure libffi-dev is at latest version (prereq for Python cryptography lib)
-    apt:
-      name: libffi-dev
-      state: latest
-      cache_valid_time: 600
-    become: yes
-
-  - name: ensure python-dev is at latest version (prereq for Python cryptography lib)
-    apt:
-      name: python-dev
-      state: latest
-      cache_valid_time: 600
     become: yes
 
   #
@@ -234,34 +179,21 @@
 #  Actions for the crawler master
 #
 - hosts: crawl-masters
-  vars:
-    mysql_rt_pass: 'no way hose head'
-    mysql_dbling_pass: 'no way hose head'
   remote_user: ubuntu
 
   tasks:
+  - include_vars:
+      file: 'secret/passes.yml'
+
   #
   #  MySQL Setup and Configuration
   #
-  - name: ensure mysql-server is at the latest version
-    apt:
-      name: mysql-server
-      state: latest
-      cache_valid_time: 600
-    become: yes
-
-  - name: ensure mysql-client is at the latest version
-    apt:
-      name: mysql-client
-      state: latest
-      cache_valid_time: 600
-    become: yes
-
-  - name: ensure python3-mysqldb is at the latest version
-    apt:
-      name: python3-mysqldb
-      state: latest
-      cache_valid_time: 600
+  - name: ensure mysql packages are at the latest version
+    apt: name={{ item }} state=latest cache_valid_time=600
+    with_items:
+      - mysql-server
+      - mysql-client
+      - python3-mysqldb
     become: yes
 
   - name: set root password for MySQL
@@ -398,25 +330,12 @@
   remote_user: ubuntu
 
   tasks:
-  - name: ensure sshfs is at latest version
-    apt:
-      name: sshfs
-      state: latest
-      cache_valid_time: 600
-    become: yes
-
-  - name: ensure upstart is at latest version
-    apt:
-      name: upstart
-      state: latest
-      cache_valid_time: 600
-    become: yes
-
-  - name: ensure fuse is at latest version
-    apt:
-      name: fuse
-      state: latest
-      cache_valid_time: 600
+  - name: ensure sshfs, upstart, and fuse are at latest version
+    apt: name={{ item }} state=latest cache_valid_time=600
+    with_items:
+      - sshfs
+      - upstart
+      - fuse
     become: yes
 
   - name: configure fuse to allow other users to access the remote directory
