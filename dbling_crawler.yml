@@ -230,18 +230,18 @@
       state: present
     register: db_chrome
 
-  - name: set up privileges for user 'dbling_dbusr'@'localhost'
+  - name: set up privileges for user on host 'localhost'
     mysql_user:
-      name: dbling_dbusr
+      name: '{{ mysql_dbling_user }}'
       host: localhost
       password: '{{ mysql_dbling_pass }}'
       state: present
       priv: 'chrome.*:SELECT,INSERT,UPDATE,CREATE,ALTER'
     register: db_perm_local
 
-  - name: set up privileges for user 'dbling_dbusr'@'10.90.%'
+  - name: set up privileges for user on hosts '10.90.%'
     mysql_user:
-      name: dbling_dbusr
+      name: '{{ mysql_dbling_user }}'
       host: '10.90.%'
       password: '{{ mysql_dbling_pass }}'
       state: present
@@ -272,6 +272,19 @@
       name: rabbitmq-server
       state: latest
       cache_valid_time: 600
+    become: yes
+
+  - name: Add dbling user to RabbitMQ as administrator
+    rabbitmq_user:
+      user: '{{ rabbit_user }}'
+      password: '{{ rabbit_pass }}'
+      state: present
+      tags: administrator
+      permissions:
+        - vhost: /
+          configure_priv: .*
+          write_priv: .*
+          read_priv: .*
     become: yes
 
   - name: enable RabbitMQ management console
