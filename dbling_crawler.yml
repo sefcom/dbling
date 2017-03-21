@@ -186,6 +186,23 @@
       file: 'secret/passes.yml'
 
   #
+  #  Cinder Volume Setup
+  #
+  - name: Ensure Cinder volumes are mounted
+    mount:
+      state: mounted
+      src: "{{ item.src }}"
+      name: "{{ item.path }}" # As of Ansible 2.3, the "name" option has been changed to "path" as default, but "name" still works as well.
+      fstype: ext4
+      opts: defaults
+      dump: 0
+      passno: 2
+    with_items:
+      - { src: 'UUID=bee6c48f-f2e9-46ab-96a5-4669410f783c', path: '/var/lib/mysql' }
+      - { src: 'UUID=9208c14a-6ce3-47f8-be9a-53731efdcfe3', path: '/var/lib/dbling' }
+    become: yes
+
+  #
   #  MySQL Setup and Configuration
   #
   - name: ensure mysql packages are at the latest version
