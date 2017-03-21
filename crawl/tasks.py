@@ -5,7 +5,6 @@ from __future__ import absolute_import
 import logging
 from datetime import timedelta
 from json import dumps
-from os import path
 from time import perf_counter
 
 from celery import chord

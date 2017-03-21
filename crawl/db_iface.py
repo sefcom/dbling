@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError, InvalidRequestError, DatabaseError
 from sqlalchemy.orm import scoped_session, sessionmaker
 
 from common.chrome_db import DB_ENGINE, extension, id_list
-from common.util import MunchyMunch, dict_to_dt, PROGRESS_PERIOD
+from common.util import MunchyMunch, dict_to_dt
 from crawl.celery import app
 
 __all__ = ['add_new_crx_to_db', 'db_download_complete', 'db_extract_complete', 'db_profile_complete',
