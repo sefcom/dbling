@@ -8,7 +8,7 @@ from plotly import offline as plotoff
 from plotly.graph_objs import Bar, Layout, Figure
 from sqlalchemy import Table, select, update, and_, insert, desc
 
-from chrome_db import *
+from common.chrome_db import *
 
 TESTING = False
 

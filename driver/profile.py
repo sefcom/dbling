@@ -15,7 +15,7 @@ from os import geteuid, seteuid
 
 from docopt import docopt
 
-from graph_diff import FilesDiff, init_logging
+from .graph_diff import FilesDiff, init_logging
 from merl import Merl
 from graph_tool.topology import shortest_distance
 
@@ -68,10 +68,8 @@ def extract_candidates(orig_graph):
     :rtype: list
     """
     candidates = []
-    while True:
-        # Stop iterating when we've emptied the original graph
-        if orig_graph.num_vertices() == 0:
-            break
+    # Stop iterating when we've emptied the original graph
+    while orig_graph.num_vertices() > 0:
         sub_graph = orig_graph.copy()
 
         sg_vertices = get_subtree_vertices(sub_graph)
@@ -114,7 +112,7 @@ def get_subtree_vertices(g):
     dist = shortest_distance(g, g.vertex(0), directed=False)
 
     l = []
-    for v, i in zip(dist.a, range(len(dist.a))):
+    for i, v in enumerate(dist.a):
         # If the calculated distance is the max, assume it is infinite (not reachable), i.e. not part of the same
         # subgraph.
         if v < MAX_DIST:

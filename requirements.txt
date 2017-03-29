@@ -10,3 +10,5 @@ pyuefi>=0.1
 aiodns
 munch
 uvloop
+-r merl/requirements.txt
+-r other/requirements.txt

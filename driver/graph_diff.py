@@ -19,12 +19,10 @@ import graph_tool.all as gt
 from docopt import docopt
 from lxml import etree
 
-from centroid import get_tree_top
-import clr
-from const import *
-import crx_crawler
-import util
-
+from common import clr
+from common import util
+from common.centroid import get_tree_top
+from common.const import *
 
 FILE = 1
 DIRECTORY = 2
@@ -924,6 +922,6 @@ if __name__ == '__main__':
     main(docopt(__doc__))
 else:
     # This file was imported, so do all the necessary configuration
-    crx_crawler.MIN_DEPTH = FILTERED_MIN_DEPTH
+    # crx_crawler.MIN_DEPTH = FILTERED_MIN_DEPTH
     MIN_DEPTH = FILTERED_MIN_DEPTH
     MAX_FILES = 1

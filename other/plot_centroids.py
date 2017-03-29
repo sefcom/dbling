@@ -13,7 +13,7 @@ from plotly import offline as pyoff
 from plotly.graph_objs import Scatter, Marker, Data, Histogram
 from sqlalchemy import select, Table
 
-from centroid import centroid_difference, get_normalizing_vector, USED_FIELDS, USED_TO_DB, DB_META
+from common.centroid import centroid_difference, get_normalizing_vector, USED_FIELDS, USED_TO_DB, DB_META
 
 
 OFFLINE = True

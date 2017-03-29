@@ -7,10 +7,10 @@ from operator import itemgetter
 from bs4 import BeautifulSoup
 from sqlalchemy import Table, select
 
-from centroid import CentroidCalc, get_normalizing_vector, centroid_difference, USED_FIELDS, USED_TO_DB, DB_META
+from common.centroid import CentroidCalc, get_normalizing_vector, centroid_difference, USED_FIELDS, USED_TO_DB, DB_META
 
 
-STARTER = """<merl xmlns:df="https://github.com/dfxml-working-group/dfxml_schema"></merl>"""
+STARTER = '<merl xmlns:df="https://github.com/dfxml-working-group/dfxml_schema"></merl>'
 MAX_FAMILY_MATCHES = 1000
 
 
@@ -122,11 +122,11 @@ class Merl:
             print('\nCandidate Matches', file=self._out_file)
             print('-----------------\n', file=self._out_file)
         n = 0
-        for e in sorted(hit_entries, key=itemgetter('confidence'), reverse=True):
+        for ent in sorted(hit_entries, key=itemgetter('confidence'), reverse=True):
             n += 1
             print('#%d' % n, file=self._out_file)
-            for k in e:
-                print('%s: %s' % (k, e[k]), file=self._out_file)
+            for k in ent:
+                print('%s: %s' % (k, ent[k]), file=self._out_file)
             print(file=self._out_file)
 
     def _get_source(self, graph):

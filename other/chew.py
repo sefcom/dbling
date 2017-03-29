@@ -43,7 +43,7 @@ class Chew(object):
 
         self.now = datetime.now()
 
-        # Create the EWF file
+        # Create an image of the disk
         self._img_dir = path.join(path.dirname(path.realpath(__file__)), '../images/')
         self._dfxml = None
         self._img = None
@@ -53,8 +53,7 @@ class Chew(object):
                 self.do_dfxml()
 
     def do_acquisition(self, stamp=None, dd=False, confirm=False):
-        """
-        Try acquisition with ewfacquire first, then use dd if it fails.
+        """Try acquisition with ewfacquire first, then use dd if it fails.
 
         :param stamp: Time stamp to append to the image name.
         :type stamp: datetime
@@ -71,8 +70,7 @@ class Chew(object):
         return self._img
 
     def _do_dd_acquisition(self, stamp=None, confirm=False):
-        """
-        Call dd as a subprocess.
+        """Call dd as a subprocess.
 
         :param stamp: Time stamp to append to the image name.
         :type stamp: datetime
