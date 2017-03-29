@@ -126,6 +126,7 @@
       state: directory
       group: celery
       owner: ubuntu
+      mode: 0775
     become: yes
 
   - name: create crx log file that's writable by celery user
@@ -135,7 +136,7 @@
       force: no
       group: celery
       owner: ubuntu
-      mode: 664
+      mode: 0664
     become: yes
 
   - name: ensure dir for dbling's sitemaps exists
@@ -144,6 +145,7 @@
       state: directory
       group: celery
       owner: ubuntu
+      mode: 0775
     become: yes
 
   - name: copy python libraries requirements file
@@ -267,11 +269,30 @@
   #
   #  RabbitMQ Setup and Configuration
   #
+  - name: Add the apt key for RabbitMQ
+    # This and the next task are necessary because the version of RabbitMQ available in Ubuntu 16.04 is incompatible with systemd
+    apt_key:
+      url: "https://www.rabbitmq.com/rabbitmq-release-signing-key.asc"
+      state: present
+    become: yes
+
+  - name: Add RabbitMQ APT repository
+    apt_repository:
+      repo: "deb http://www.rabbitmq.com/debian/ testing main"
+      state: present
+      filename: rabbitmq
+      update_cache: yes
+    become: yes
+
+  - name: update apt's cache
+    apt:
+      update_cache: yes
+    become: yes
+
   - name: ensure rabbitmq-server is at the latest version
     apt:
       name: rabbitmq-server
       state: latest
-      cache_valid_time: 600
     become: yes
 
   - name: Add dbling user to RabbitMQ as administrator
