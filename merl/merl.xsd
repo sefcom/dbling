@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema
+  xmlns:xs="http://www.w3.org/2001/XMLSchema"
+  xmlns:dfxml="http://www.forensicswiki.org/wiki/Category:Digital_Forensics_XML"
+  xmlns:merl="http://mikemabey.com/schema/merl"
+  targetNamespace="http://mikemabey.com/schema/merl"
+  version="0.1"
+  elementFormDefault="qualified">
+
+  <xs:annotation>
+    <xs:documentation>
+      This is the schema file for Matching Extension Ranking List (MERL) version 0.1.
+    </xs:documentation>
+  </xs:annotation>
+
+  <xs:import namespace="http://www.forensicswiki.org/wiki/Category:Digital_Forensics_XML" schemaLocation="dfxml.xsd">
+    <xs:annotation>
+      <xs:documentation>
+        The DFXML schema needs to be imported to validate with the `xmllint` utility.
+
+        xmllint --noout --schema http://www.w3.org/2001/XMLSchema.xsd merl.xsd
+      </xs:documentation>
+    </xs:annotation>
+  </xs:import>
+
+  <xs:element name="merl">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="merl:source" minOccurs="0" maxOccurs="1"/>
+        <xs:element ref="dfxml:creator" minOccurs="0" maxOccurs="1"/>
+        <xs:element ref="merl:match" minOccurs="0" maxOccurs="unbounded"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <!--All further elements listed in alphabetical order.-->
+
+  <xs:element name="candidate">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="merl:ext_id" minOccurs="1" maxOccurs="1"/>
+        <xs:element ref="merl:ext_ver" minOccurs="1" maxOccurs="1"/>
+        <xs:element ref="merl:ext_name" minOccurs="0" maxOccurs="1"/>
+        <xs:element ref="merl:ext_vendor" minOccurs="0" maxOccurs="1"/>
+        <xs:element ref="merl:confidence" minOccurs="0" maxOccurs="1"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="confidence" type="xs:float"/>
+
+  <xs:element name="ext_id" type="xs:string"/>
+
+  <xs:element name="ext_name" type="xs:string"/>
+
+  <xs:element name="ext_vendor" type="xs:string"/>
+
+  <xs:element name="ext_ver" type="xs:string"/>
+
+  <xs:element name="inode" type="xs:nonNegativeInteger"/>
+
+  <xs:element name="match">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="merl:inode" minOccurs="1" maxOccurs="1"/>
+        <xs:element ref="merl:candidate" minOccurs="1" maxOccurs="unbounded"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="mount_point" type="xs:string"/>
+
+  <xs:element name="source">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="dfxml:image_filename" minOccurs="0" maxOccurs="unbounded"/>
+        <xs:element ref="merl:mount_point" minOccurs="0" maxOccurs="1"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>
