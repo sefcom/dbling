@@ -322,7 +322,7 @@ def get_normalizing_vector(db_meta=DB_META):
     for row in db_conn.execute(select([extension])):
         for field in all_fields:
             col = getattr(extension.c, USED_TO_DB[field])
-            if row[col] > norm_dict[field]:
+            if row[col] is not None and row[col] > norm_dict[field]:
                 norm_dict[field] = row[col]
     for field in all_fields:
         norm_tup += (norm_dict[field],)

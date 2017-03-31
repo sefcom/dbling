@@ -2,22 +2,33 @@
 """
 The case study script for the DFRWS paper.
 
-Usage: case_study.py [options] -d DFXML_FILE
-       case_study.py [options] -m MOUNT_POINT
+Usage: profile.py [options] -d DFXML_FILE
+       profile.py [options] -m MOUNT_POINT
 
 Options:
  -v   Verbose mode. Changes logging mode from INFO to DEBUG.
  -g   Show graph before searching for matches.
  -o MERL   Output results to the file MERL.
+
+
+As a reminder, the command to mount an image is:
+
+ sudo mount -o ro -t <fs_type> <img_file> </mount/point>
 """
 import logging
+import sys
 from os import geteuid, seteuid
+from os.path import abspath, dirname, join
 
 from docopt import docopt
-
-from .graph_diff import FilesDiff, init_logging
-from merl import Merl
 from graph_tool.topology import shortest_distance
+
+try:
+    from merl import Merl
+except ImportError:
+    sys.path.append(join(dirname(abspath(__file__)), '..'))
+    from merl import Merl
+    from driver.graph_diff import FilesDiff, init_logging
 
 
 MAX_DIST = 2147483647  # Assumes the distance PropertyMap will be of type int32
@@ -48,10 +59,12 @@ def go(start, mounted=False, verbose=False, show_graph=False, output_file=None):
     #     graph.show_graph(c)
 
     logging.info('Searching the DB for matches for each candidate graph. (%d)' % len(candidates))
-    merl = Merl()
-    merl.output_file = output_file
+    merl = Merl(out_fp=output_file)
     merl.match_candidates(candidates)
-    # TODO: Save XML to file
+
+    # Save XML to file
+    if output_file is not None:
+        merl.save_merl()
 
     merl.close_db()
 
