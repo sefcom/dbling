@@ -138,7 +138,10 @@ def db_extract_complete(crx_obj, log_progress=False):
     u = extension.update().where(and_(extension.c.ext_id == crx_obj.id,
                                       extension.c.version == crx_obj.version)). \
         values(last_known_available=dict_to_dt(crx_obj.dt_avail),
-               extracted=dict_to_dt(crx_obj.dt_extracted))
+               extracted=dict_to_dt(crx_obj.dt_extracted),
+               name=crx_obj.name,
+               m_version=crx_obj.m_version,
+               )
     _execute_and_commit(db_session, u)
     log('{} [{}/{}]  Updated DB after extracting extension'.format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
 

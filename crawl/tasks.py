@@ -4,7 +4,7 @@ from __future__ import absolute_import
 
 import logging
 from datetime import timedelta
-from json import dumps
+from json import dumps, load
 from os import path
 from tempfile import TemporaryDirectory
 from time import perf_counter
@@ -252,8 +252,14 @@ def extract_crx(crx_obj):
 
     - `dt_extracted`: Date and time the extraction was completed.
 
-    :param crx_obj: Previously collected information about the extension.
-    :type crx_obj: munch.Munch
+    Also calls :function:`read_manifest`, which adds the following keys to
+    `crx_obj`:
+
+    - `name`: Name of the extension as specified in the manifest.
+    - `m_version`: Version of the extension as specified in the manifest.
+
+    :param munch.Munch crx_obj: Previously collected information about the
+        extension.
     :return: Updated version of `crx_obj`.
     :rtype: munch.Munch
     """
@@ -304,7 +310,34 @@ def extract_crx(crx_obj):
         crx_obj.msgs.append('+Unpacked a Zip file')
         logging.debug('{} [{}/{}]  Unpack complete'.format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
         crx_obj.dt_extracted = dt_dict_now()
+        crx_obj = read_manifest(crx_obj)
         db_extract_complete(crx_obj)
+
+    return crx_obj
+
+
+def read_manifest(crx_obj):
+    """Retrieve name and version info from the manifest.
+
+    For manifest file format info, see
+    https://developer.chrome.com/extensions/manifest
+
+    Adds the following keys to `crx_obj`:
+
+    - `name`: Name of the extension as specified in the manifest.
+    - `m_version`: Version of the extension as specified in the manifest.
+
+    :param munch.Munch crx_obj: Previously collected information about the
+        extension.
+    :return: Updated version of `crx_obj`.
+    :rtype: munch.Munch
+    """
+    # Open manifest file from extracted dir and get name and version of the extension
+    with open(path.join(crx_obj.extracted_path, 'manifest.json')) as manifest_file:
+        manifest = load(manifest_file)
+
+    crx_obj.name = manifest['name']
+    crx_obj.m_version = manifest['version']
 
     return crx_obj
 

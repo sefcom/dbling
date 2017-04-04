@@ -52,7 +52,9 @@ USED_TO_DB = {'_c_ctime': 'ctime',
 extension = Table('extension', DB_META,
                   Column('pk', Integer, primary_key=True),
                   Column('ext_id', String(32)),
-                  Column('version', String(20)),
+                  Column('version', String(23)),  # See https://developer.chrome.com/extensions/manifest/version
+                  Column('m_version', String(23)),  # Version as specified in the manifest.
+                  Column('name', String(45)),  # See https://developer.chrome.com/extensions/manifest/name#name
                   Column('last_known_available', DateTime(True)),
                   Column('last_known_unavailable', DateTime(True)),
                   Column('downloaded', DateTime(True)),
