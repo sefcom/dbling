@@ -5,8 +5,8 @@ from __future__ import absolute_import
 
 import asyncio
 import logging
-from glob import glob
-from os import path, remove
+from os import path
+from tempfile import TemporaryDirectory, TemporaryFile
 from time import sleep
 from urllib.parse import urlparse, parse_qs
 
@@ -52,29 +52,28 @@ class VersionExtractError(Exception):
 class DownloadCRXList:
     # Namespace tag used by the downloaded list (XML file)
     _ns = '{http://www.sitemaps.org/schemas/sitemap/0.9}'
-    sitemap_dir = path.join(DBLING_DIR, 'crawl', 'sitemaps')
-    local_sitemap = path.join(sitemap_dir, 'chrome_sitemap.xml')
+    list_list_url = 'https://chrome.google.com/webstore/sitemap'
 
     def __init__(self, ext_url, *, return_count=False, session=None):
         """Generate list of extension IDs downloaded from Google.
 
-        :param ext_url: Specially crafted URL that will let us download the
+        :param str ext_url: Specially crafted URL that will let us download the
             list of extensions.
-        :type ext_url: str
-        :param return_count: When True, will return a tuple of the form:
+        :param bool return_count: When True, will return a tuple of the form:
             `(crx_id, job_number)`, where `job_number` is the index of the ID
             plus 1. This way, the job number of the last ID returned will be
             the same as `len(DownloadCRXList)`.
-        :type return_count: bool
-        :param session: Session object to use when downloading the list.
-        :type session: requests.Session
+        :param requests.Session session: Session object to use when downloading
+            the list. If None, a new :class:`requests.Session` object is
+            created.
         """
         self.ext_url = ext_url
-        self.session = session
+        self.session = session if isinstance(session, requests.Session) else requests.Session()
         self._downloaded_list = False
         self.ret_tup = return_count  # Return a tuple (CRX ID, num)
         self._id_list = []
         self._next_id_index = 0
+        self.sitemap_dir = None
 
     def __iter__(self):
         if not self._downloaded_list:
@@ -101,7 +100,8 @@ class DownloadCRXList:
         :return:
         """
         loop = asyncio.get_event_loop_policy().new_event_loop()
-        loop.run_until_complete(self._async_download_lists())
+        with TemporaryDirectory() as self.sitemap_dir:
+            loop.run_until_complete(self._async_download_lists())
         self._downloaded_list = True
 
     async def _async_download_lists(self):
@@ -112,42 +112,47 @@ class DownloadCRXList:
         logging.info('Downloading the list of extension lists from Google.')
 
         # Download the first list
-        list_list_url = 'https://chrome.google.com/webstore/sitemap'
-        resp = _http_get(list_list_url, self.session, stream=False, headers=make_download_headers())
+        resp = _http_get(self.list_list_url, self.session, stream=False, headers=make_download_headers())
         if resp is None:
             logging.critical('Failed to download list of extensions.')
             raise ListDownloadFailedError('Unable to download list of extensions.')
 
         # Save the list
-        with open(self.local_sitemap, 'wb') as fout:
-            for chunk in resp.iter_content(chunk_size=None):
-                fout.write(chunk)
-        del resp
+        local_sitemap = TemporaryFile(dir=self.sitemap_dir)
+        for chunk in resp.iter_content(chunk_size=None):
+            local_sitemap.write(chunk)
+        resp.close()
 
         # Go through the list, extracting list URLs
         ids = set()
-        xml_tree = etree.parse(self.local_sitemap)
+        local_sitemap.seek(0)
+        xml_tree = etree.parse(local_sitemap)
         num_lists = 0
+        duplicate_count = 0
         for url_tag in xml_tree.iterfind('*/' + self._ns + 'loc'):
             # Download the URL, get the IDs from it and add them to the set of IDs
             try:
-                ids |= await self._dl_parse_id_list(url_tag.text)
+                _ids = await self._dl_parse_id_list(url_tag.text)
             except ListDownloadFailedError:
                 # TODO: How to handle this?
                 raise
+            else:
+                x = len(_ids)
+                y = len(ids)
+                ids |= _ids
+                duplicate_count += (y + x) - len(ids)
             num_lists += 1
-        duplicate_count = len(ids)
 
         logging.info('Done downloading. Doing some cleanup...')
 
-        # Delete all the lists
-        [remove(x) for x in glob(path.join(self.sitemap_dir, '*.xml'))]
+        # Close (and delete) the temporary file where the list was stored
+        local_sitemap.close()
 
         # Convert IDs to a list, then sort it
         self._id_list = list(ids)
         self._id_list.sort()
 
-        logging.info('There were {} duplicate IDs from the {} lists.'.format(duplicate_count - len(self), num_lists))
+        logging.warning('There were {} duplicate IDs from the {} lists.'.format(duplicate_count - len(self), num_lists))
 
     async def _dl_parse_id_list(self, list_url):
         """Download the extension list at the given URL, return set of IDs.
@@ -167,7 +172,8 @@ class DownloadCRXList:
             hl = ' (language: {})'.format(_hl[0])
             _hl = '_{}'.format(_hl[0])
         list_id = '{} of {}{}'.format(shard, numshards, hl)
-        sitemap = path.join(self.sitemap_dir, 'sitemap{}_{}_{}.xml'.format(_hl, shard, numshards))
+        sitemap = TemporaryFile(prefix='sitemap{}_{}_{}'.format(_hl, shard, numshards), suffix='.xml',
+                                dir=self.sitemap_dir)
 
         # Download the IDs list
         resp = _http_get(list_url, self.session, stream=False, headers=make_download_headers())
@@ -177,13 +183,13 @@ class DownloadCRXList:
             raise ListDownloadFailedError(msg)
 
         # Save the list
-        with open(sitemap, 'wb') as fout:
-            for chunk in resp.iter_content(chunk_size=None):
-                fout.write(chunk)
-        del resp
+        for chunk in resp.iter_content(chunk_size=None):
+            sitemap.write(chunk)
+        resp.close()
 
         # Extract the IDs
         ids = set()
+        sitemap.seek(0)
         xml_tree = etree.parse(sitemap)
         for url_tag in xml_tree.iterfind('*/' + self._ns + 'loc'):
             # Get just the URL path (strips the scheme, netloc, params, query, and fragment segments)
@@ -192,6 +198,7 @@ class DownloadCRXList:
             crx_id = path.basename(crx_id)
             ids.add(crx_id)
         log('Downloaded extension list {}. Qty: {}'.format(list_id, len(ids)))
+        sitemap.close()
 
         return ids
 
