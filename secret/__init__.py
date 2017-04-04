@@ -3,7 +3,6 @@
 # below.
 #
 # crx_save_path = ''  # Path where the CRXs should be saved when downloaded
-# crx_extract_path = ''  # Path where the CRXs should be unpacked
 # db_info = {  # Database access information
 #     'uri': '',  # Full URI for accessing the DB. See SQLAlchemy docs for more info.
 #     'user': '',

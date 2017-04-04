@@ -6,6 +6,7 @@ import logging
 from datetime import timedelta
 from json import dumps
 from os import path
+from tempfile import TemporaryDirectory
 from time import perf_counter
 
 from celery import chord
@@ -20,8 +21,8 @@ from crawl.celery import app
 from crawl.webstore_iface import *
 from crawl.db_iface import *
 
-CHROME_VERSION = calc_chrome_version(_conf['version'], _conf['release_date'])
-DOWNLOAD_URL = _conf['url'].format(CHROME_VERSION, '{}')
+CHROME_VERSION = calc_chrome_version(_conf.version, _conf.release_date)
+DOWNLOAD_URL = _conf.url.format(CHROME_VERSION, '{}')
 
 TESTING = READ_ONLY
 
@@ -55,7 +56,7 @@ def start_list_download():
     logging.info('Beginning list download...')
 
     dt_avail = dt_dict_now()  # All CRXs get the same value because we download the list at one specific time
-    crx_list = DownloadCRXList(_conf['extension_list_url'], return_count=True)
+    crx_list = DownloadCRXList(_conf.extension_list_url, return_count=True)
 
     if TESTING:
         logging.warning('TESTING MODE: All DB transactions will be rolled back, NOT COMMITTED.')
@@ -100,8 +101,22 @@ def process_crx(crx_obj):
     Celery cannot synchronize groups, so we have to synchronously call the
     functions for each step: download, extract, profile.
 
-    Adds the following key to `crx_obj`:
+    We use a temporary directory for extracting extensions for two reasons.
+    First, using a real directory greatly increases the file operations that
+    have to occur via `sshfs`, which slows things down and increases the I/O
+    burden on `dbling-master`. A temp directory keeps the files local to the
+    worker machine and avoids this issue.
 
+    Second, there aren't any very good reasons for keeping three versions of
+    every extension. Prior to incorporating the :module:`tempfile` module, we
+    were saving the CRX, the zip version (which is just the CRX without the
+    headers), and the extracted zip. Eliminating the latter two versions
+    reduces the size of the data set.
+
+    Adds the following keys to `crx_obj`:
+
+    - `extracted_path`: Temporary dir that will be the location of the unpacked
+      extension files.
     - `stop_processing`: Flag indicating an error during processing.
 
     :param crx_obj: Details of a single CRX, which gets updated at every step.
@@ -114,11 +129,15 @@ def process_crx(crx_obj):
     # This flag tells us if any error occur that are bad enough we should stop processing the CRX
     crx_obj.stop_processing = False
 
-    # The three steps
-    for step in (download_crx, extract_crx, profile_crx):
-        crx_obj = step(crx_obj)
-        if crx_obj.stop_processing:
-            break
+    with TemporaryDirectory(dir=_conf.extract_dir) as extracted_path:
+        # This temporary directory will only exist within this "with" clause
+        crx_obj.extracted_path = extracted_path
+
+        # The three steps
+        for step in (download_crx, extract_crx, profile_crx):
+            crx_obj = step(crx_obj)
+            if crx_obj.stop_processing:
+                break
 
     log = logging.info if not (crx_obj.job_num % PROGRESS_PERIOD) else logging.debug
     log('{} [{}/{}]  Completed processing CRX'.format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
@@ -152,7 +171,7 @@ def download_crx(crx_obj):
 
     try:
         # Save the CRX, then check if the DB already has this version.
-        crx_obj = save_crx(crx_obj, DOWNLOAD_URL, save_path=_conf['save_path'])
+        crx_obj = save_crx(crx_obj, DOWNLOAD_URL, save_path=_conf.save_path)
         crx_obj.dt_downloaded = dt_dict_now()  # Check duplicate will use this to insert a new row if needed
 
         db_download_complete(crx_obj)
@@ -229,9 +248,8 @@ def download_crx(crx_obj):
 def extract_crx(crx_obj):
     """Unpack (extract) the CRX, process any errors.
 
-    Adds the following keys to `crx_obj`:
+    Adds the following key to `crx_obj`:
 
-    - `extracted_path`: Location of the unpacked extension files.
     - `dt_extracted`: Date and time the extraction was completed.
 
     :param crx_obj: Previously collected information about the extension.
@@ -240,11 +258,9 @@ def extract_crx(crx_obj):
     :rtype: munch.Munch
     """
 
-    extracted_path = path.join(_conf['extract_dir'], crx_obj.id, crx_obj.version)
-
     # TODO: Does the image tally provide any useful information?
     try:
-        unpack(crx_obj.full_path, extracted_path, overwrite_if_exists=True)
+        unpack(crx_obj.full_path, crx_obj.extracted_path, overwrite_if_exists=True)
 
     except FileExistsError:
         # No need to get the path from the error since we already know the extracted path
@@ -287,7 +303,6 @@ def extract_crx(crx_obj):
     else:
         crx_obj.msgs.append('+Unpacked a Zip file')
         logging.debug('{} [{}/{}]  Unpack complete'.format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
-        crx_obj.extracted_path = extracted_path
         crx_obj.dt_extracted = dt_dict_now()
         db_extract_complete(crx_obj)
 
