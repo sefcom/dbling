@@ -102,23 +102,16 @@
       group: ubuntu
     become: yes
 
-  - name: sync the files in common
+  - name: sync the source files
     synchronize:
-      src: common
+      src: "{{ item }}"
       dest: "{{ code_dir }}"
-    register: sync_common
-
-  - name: sync the files in crawl
-    synchronize:
-      src: crawl
-      dest: "{{ code_dir }}"
-    register: sync_crawl
-
-  - name: sync the files in secret
-    synchronize:
-      src: secret
-      dest: "{{ code_dir }}"
-    register: sync_secret
+    with_items:
+      - common
+      - crawl
+      - merl
+      - secret
+    register: sync_sources
 
   - name: ensure dir for dbling's logs exists
     file:
@@ -148,16 +141,15 @@
       mode: 0775
     become: yes
 
-  - name: copy python libraries requirements file
-    copy:
-      src: requirements.txt
-      dest: "{{ code_dir }}/requirements.txt"
-    register: sync_reqs
-
   - name: install python libraries
     pip:
       executable: pip3
-      requirements: "{{ code_dir }}/requirements.txt"
+      requirements: "{{ code_dir }}/{{ item }}/requirements.txt"
+    with_items:
+      - common
+      - crawl
+      - merl
+      - secret
     become: yes
 
   #
@@ -351,8 +343,7 @@
   - name: reload systemctl units
     command: systemctl daemon-reload
     become: yes
-    when: sync_celerybeat_d.changed or sync_celerybeat_conf.changed or sync_common.changed or sync_crawl.changed or
-          sync_secret.changed or sync_reqs.changed
+    when: sync_celerybeat_d.changed or sync_celerybeat_conf.changed or sync_sources.changed
     register: service_systemctl_restarted
 
   - name: restart celerybeat if the configuration changed (service already exists)
@@ -443,8 +434,8 @@
       name: celeryd
       state: restarted
     become: yes
-    when: (sync_celery_d.changed or sync_celery_conf.changed or sync_common.changed or sync_crawl.changed or
-           sync_secret.changed or sync_reqs.changed) and celeryd_check.stdout.find('celery') != -1
+    when: (sync_celery_d.changed or sync_celery_conf.changed or sync_sources.changed)
+          and celeryd_check.stdout.find('celery') != -1
     register: service_celeryd
 
   - name: ensure celeryd service is started

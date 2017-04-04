@@ -1,1 +1,5 @@
+beautifulsoup4
+docopt
 plotly
+pyuefi>=0.1
+sqlalchemy
