@@ -76,7 +76,7 @@ def extract_candidates(orig_graph):
     Return a list of graph objects, each a candidate graph.
 
     :param orig_graph: The original graph made from the DFXML.
-    :type orig_graph: graph_tool.Graph
+    :type orig_graph: common.graph.DblingGraph
     :return: List of candidate graph objects.
     :rtype: list
     """
@@ -116,7 +116,7 @@ def get_subtree_vertices(g):
     Return a list of all vertices connected to node.
 
     :param g: The graph from which to extract a subgraph.
-    :type g: graph_tool.Graph
+    :type g: common.graph.DblingGraph
     :return: The list of all vertices in a subgraph of g.
     :rtype: list
     """

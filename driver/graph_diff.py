@@ -15,7 +15,6 @@ import os
 from hashlib import sha256
 from os import path
 
-import graph_tool.all as gt
 from docopt import docopt
 from lxml import etree
 
@@ -23,11 +22,8 @@ from common import clr
 from common import util
 from common.centroid import get_tree_top
 from common.const import *
+from common.graph import DblingGraph, make_graph_from_dir, get_dir_depth, graph_draw
 
-FILE = 1
-DIRECTORY = 2
-DT_DIR = 4
-DT_REG = 8
 MAX_FILES = 2
 
 KNOWN_EXT_DIR = None
@@ -72,44 +68,19 @@ class FileObj(object):
 
 class _GraphDiff(object):
 
+    # Regular expressions for filtering files
+    ex_pat_dot = re.compile('/\.\.?$')
+    ex_pat_shadow = re.compile('^/?home/\.shadow/(.+)')
+    in_pat_home = re.compile('^/?home$')
+    in_pat_shadow = re.compile('^/?home/\.shadow$')
+
     def __init__(self, dupl_file=None):
-        self.digr = gt.Graph()
+        self.digr = DblingGraph()
         self.type_count = {}
         self.home_vertex = None
         self.dupl_file = dupl_file
         self._filter_depth = False
         self.gi = {}  # graph indexes: maps vertex "labels" to vertex objects
-
-        # Create the internal property maps
-        self.digr.vp['inode'] = self.digr.new_vertex_property('int')
-        self.digr.vp['parent_inode'] = self.digr.new_vertex_property('int')
-        self.digr.vp['filename'] = self.digr.new_vertex_property('string')
-        self.digr.vp['filename_id'] = self.digr.new_vertex_property('string')
-        self.digr.vp['filename_end'] = self.digr.new_vertex_property('string')
-        self.digr.vp['name_type'] = self.digr.new_vertex_property('string')
-        self.digr.vp['type'] = self.digr.new_vertex_property('vector<short>')
-        self.digr.vp['alloc'] = self.digr.new_vertex_property('bool')
-        self.digr.vp['used'] = self.digr.new_vertex_property('bool')
-        self.digr.vp['fs_offset'] = self.digr.new_vertex_property('string')
-        self.digr.vp['filesize'] = self.digr.new_vertex_property('string')
-        self.digr.vp['src_files'] = self.digr.new_vertex_property('vector<short>')
-        self.digr.vp['encrypted'] = self.digr.new_vertex_property('bool')
-        self.digr.vp['eval'] = self.digr.new_vertex_property('bool')
-        self.digr.vp['size'] = self.digr.new_vertex_property('string')
-        self.digr.vp['mode'] = self.digr.new_vertex_property('string')
-        self.digr.vp['uid'] = self.digr.new_vertex_property('string')
-        self.digr.vp['gid'] = self.digr.new_vertex_property('string')
-        self.digr.vp['nlink'] = self.digr.new_vertex_property('string')
-        self.digr.vp['mtime'] = self.digr.new_vertex_property('string')
-        self.digr.vp['ctime'] = self.digr.new_vertex_property('string')
-        self.digr.vp['atime'] = self.digr.new_vertex_property('string')
-        self.digr.vp['crtime'] = self.digr.new_vertex_property('string')
-        self.digr.vp['color'] = self.digr.new_vertex_property('vector<float>')
-        self.digr.vp['shape'] = self.digr.new_vertex_property('string')
-        self.digr.vp['graph_size'] = self.digr.new_vertex_property('int', val=5)
-        self.digr.vp['dir_depth'] = self.digr.new_vertex_property('short')
-        self.digr.vp['gt_min_depth'] = self.digr.new_vertex_property('bool')
-        self.digr.vp['keeper'] = self.digr.new_vertex_property('bool', val=True)
 
         # Set the "label" for vertices
         if INODE_ONLY:
@@ -119,12 +90,6 @@ class _GraphDiff(object):
 
         # Queue for removing vertices
         self._to_remove = []
-
-        # Regular expressions for filtering files
-        self.ex_pat_dot = re.compile('/\.\.?$')
-        self.ex_pat_shadow = re.compile('^/?home/\.shadow/(.+)')
-        self.in_pat_home = re.compile('^/?home$')
-        self.in_pat_shadow = re.compile('^/?home/\.shadow$')
 
     def deinit(self, clean=True, dup=False):
         if clean:
@@ -140,11 +105,14 @@ class _GraphDiff(object):
         Return a copy of the graph object.
 
         :return: A copy of the graph.
-        :rtype: graph_tool.Graph
+        :rtype: DblingGraph
         """
         return self.digr.copy()
 
     def show_graph(self, digr=None):
+        # It's probably too late to call this, but it marks this function as using the extended attributes
+        self.digr.init_extended_attrs()
+
         # TODO: If this needs to support more than MAX_FILES==3, rewrite this
         if digr is None:
             digr = self.digr
@@ -167,13 +135,13 @@ class _GraphDiff(object):
             enc = digr.vp['encrypted'][vertex]
             for t in digr.vp['type'][vertex]:
                 # May redraw the same node multiple times, but that's better than losing data in the graph # TODO: Not true anymore
-                if t == FILE:
+                if t == FType.reg:
                     if enc:
                         shape = 'hexagon'
                     else:
                         shape = 'circle'
 
-                elif t == DIRECTORY:
+                elif t == FType.dir:
                     if enc:
                         shape = 'double_triangle'
                     else:
@@ -217,18 +185,18 @@ class _GraphDiff(object):
         epen.a = 0.5
         marker = digr.new_edge_property('float')
         marker.a = 2.5
-        gt.graph_draw(digr,
-                      vertex_fill_color=digr.vp['color'],
-                      vertex_shape=digr.vp['shape'],
-                      # vertex_size=self.digr.vp['graph_size'],
-                      vertex_pen_width=vpen,
-                      edge_pen_width=epen,
-                      edge_marker_size=marker,
-                      display_props=[digr.vp['filename_end'],
-                                     digr.vp['inode'],
-                                     digr.vp['dir_depth'],
-                                     digr.vp['gt_min_depth']],
-                      )
+        graph_draw(digr,
+                   vertex_fill_color=digr.vp['color'],
+                   vertex_shape=digr.vp['shape'],
+                   # vertex_size=self.digr.vp['graph_size'],
+                   vertex_pen_width=vpen,
+                   edge_pen_width=epen,
+                   edge_marker_size=marker,
+                   display_props=[digr.vp['filename_end'],
+                                  digr.vp['inode'],
+                                  digr.vp['dir_depth'],
+                                  digr.vp['gt_min_depth']],
+                   )
 
     def add_from_file(self, file_path, img_file_id=1):
         """
@@ -244,6 +212,9 @@ class _GraphDiff(object):
         :return: None
         :rtype: None
         """
+        # The DFXML version of this script uses attributes the other version doesn't use
+        self.digr.init_extended_attrs()
+
         logging.info('Beginning import from file: %s' % file_path)
         xml_tree_root = etree.parse(file_path).getroot()
         ns = '{http://www.forensicswiki.org/wiki/Category:Digital_Forensics_XML}'
@@ -347,7 +318,7 @@ class _GraphDiff(object):
                     pass
 
                 # Get depth from /home
-                dir_depth = util.get_dir_depth(filename)
+                dir_depth = get_dir_depth(filename)
                 # Files of interest to us should be in the .../vault/user/ dir and have a depth of at least 7
                 # (when we're filtering, that is)
                 gt_min_depth = bool(re.match(IN_PAT_VAULT, filename)) and dir_depth >= MIN_DEPTH
@@ -504,7 +475,7 @@ class _GraphDiff(object):
     def add_from_mount(self, mount_point):
         # TODO: Do we need to keep from adding duplicates to this graph?
         logging.info('Beginning import from mount point: %s' % mount_point)
-        util.make_graph_from_dir(mount_point, self.digr)
+        make_graph_from_dir(mount_point, self.digr)
         self.home_vertex = get_tree_top(self.digr)
 
         # Set the default value for the keeper flag as True for all vertices
@@ -523,6 +494,9 @@ class _GraphDiff(object):
         :return: None
         :rtype: None
         """
+        # It's probably too late to call this, but it marks this function as using the extended attributes
+        self.digr.init_extended_attrs()
+
         dstring = ' '
         d_fields = (('inode', '6'), ('parent_inode', '6'), ('name_type', '2'), ('type', '2'), ('alloc', '2'),
                     ('used', '2'), ('mode', '5'), ('nlink', '3'), ('uid', '5'), ('gid', '5'), ('fs_offset', '12'),
@@ -740,6 +714,9 @@ class FilesDiff(_GraphDiff):
         :return: True (useful, keep) or False (not useful, delete)
         :rtype: bool
         """
+        # It's probably too late to call this, but it marks this function as using the extended attributes
+        self.digr.init_extended_attrs()
+
         # Check if this node has already been evaluated
         if self.digr.vp["eval"][vertex] != EVAL_NONE:
             # logging.debug('Skipping eval of node: %s' % self.digr.vp[self._id][vertex])
@@ -818,7 +795,7 @@ def vertex_is_dir(vertex, graph, strict=False):
     :param vertex: The vertex to test.
     :type vertex: graph_tool.Vertex
     :param graph: The graph that vertex belongs to.
-    :type graph: graph_tool.Graph
+    :type graph: common.graph.DblingGraph
     :param strict: If True, the first type stored in the vertex property
         vector must be the one that indicates a directory. Otherwise, any of
         the values in the vector that match will return True.
@@ -835,8 +812,8 @@ def vertex_is_dir(vertex, graph, strict=False):
     return False
 
 
-FILTERED_MIN_DEPTH = util.get_dir_depth('/home/.shadow/<user ID>/vault/user/<encrypted Extensions>/'
-                                        '<encrypted extension ID>/<encrypted extension version>/')
+FILTERED_MIN_DEPTH = get_dir_depth('/home/.shadow/<user ID>/vault/user/<encrypted Extensions>/'
+                                   '<encrypted extension ID>/<encrypted extension version>/')
 
 
 def init_logging(log_file=None, verbose=False):
@@ -888,7 +865,7 @@ def main(args):
         # http://stackoverflow.com/questions/4041480/i-mode-file-type-value-of-16
         f_type = os.stat(i_pth).st_mode >> 12
 
-        if not f_type == DT_REG:
+        if not f_type == ModeTypeDT.reg:
             continue
 
         if not re.search(dfxml_ext, i):

@@ -3,14 +3,14 @@ from copy import deepcopy as copy
 from datetime import datetime, timezone
 from math import ceil, sqrt
 
-import graph_tool.all as gt
 from sqlalchemy import Table, select
 
 from common.chrome_db import DB_META, USED_TO_DB
+from common.const import *
+from common.graph import DblingGraph
 
 # USED_FIELDS = ('_c_ctime', '_c_num_child_dirs', '_c_num_child_files', '_c_mode', '_c_depth', '_c_type')
 USED_FIELDS = ('_c_num_child_dirs', '_c_num_child_files', '_c_mode', '_c_depth', '_c_type')
-ISO_TIME = '%Y-%m-%dT%H:%M:%SZ'
 
 __all__ = ['calc_centroid', 'centroid_difference', 'get_normalizing_vector', 'InvalidCentroidError', 'InvalidTreeError',
            'ISO_TIME', 'USED_FIELDS']
@@ -21,7 +21,6 @@ class InvalidTreeError(Exception):
     Indicates a certain required property of the tree has been violated, such
     as a node having two parents, a vertex property not being valid, etc.
     """
-    pass
 
 
 class InvalidCentroidError(Exception):
@@ -31,10 +30,9 @@ class InvalidCentroidError(Exception):
     must match the number of values in the USED_FIELDS global tuple plus one,
     the last of which represents the size.
     """
-    pass
 
 
-class CentroidCalc(object):
+class CentroidCalc:
     """
     From a digraph (implemented using graph_tool.Graph), determine the tree's
     centroid with respect to the USED_FIELDS.
@@ -71,8 +69,22 @@ class CentroidCalc(object):
     first value in the vector.
     """
 
-    def __init__(self, sub_tree, block_size=4096):
-        assert isinstance(sub_tree, gt.Graph)
+    def __init__(self, sub_tree, *, block_size=4096):
+        """An object to keep track of calculating a centroid for an extension.
+
+        :param DblingGraph sub_tree: The graph object to use to calculate the
+            centroid. Must already have the following vertex properties
+            populated:
+
+            - `type`
+            - `filesize`
+            - `ctime`
+            - `filename_b_len`
+            - `mode`
+        :param int block_size: Block size that eCryptfs uses. Should always be
+            4096, but I thought I'd add it as an option just in case.
+        """
+        assert isinstance(sub_tree, DblingGraph)
         self.digr = sub_tree
         self.digr.gp['centroid'] = self.digr.new_graph_property('vector<float>')
         self.digr.vp['_c_size'] = self.digr.new_vertex_property('int')
@@ -89,11 +101,11 @@ class CentroidCalc(object):
         logging.debug('Created CentroidCalc object with %d vertices.' % self.digr.num_vertices())
 
     def do_calc(self):
-        """
-        Calculate the centroid for the tree. After calling this method, the
-        centroid vector is available from self.centroid.
+        """Calculate the centroid for the tree.
 
-        :return: None
+        After calling this method, the centroid vector is available from the
+        :attr:`CentroidCalc.centroid` property.
+
         :rtype: None
         """
         self._set_properties(self.top, 0)
@@ -207,7 +219,7 @@ def get_tree_top(digr):
     Traverse the subtree at digr and return the top-most vertex.
 
     :param digr: Some graph object.
-    :type digr: graph_tool.Graph
+    :type digr: common.graph.DblingGraph
     :return: The top-most vertex in the graph.
     :rtype: graph_tool.Vertex
     """
@@ -236,22 +248,16 @@ def get_tree_top(digr):
 
 
 def calc_centroid(sub_tree):
-    """
-    Convenience function for calculating the centroid for a tree.
+    """Convenience function for calculating the centroid for a tree.
 
     :param sub_tree: The tree for which the centroid should be calculated.
-    :type sub_tree: graph_tool.Graph
+    :type sub_tree: common.graph.DblingGraph
     :return: The centroid vector, as a tuple. Has the same number of
              dimensions as the length of USED_FIELDS + 1.
     :rtype: tuple
     """
-    assert isinstance(sub_tree, gt.Graph)
-    calc = CentroidCalc(sub_tree)
-    calc.do_calc()
-    cent = copy(calc.centroid)
-    # Try to conserve memory usage
-    del calc
-    return cent
+    assert isinstance(sub_tree, DblingGraph)
+    return copy(CentroidCalc(sub_tree).centroid)
 
 
 def centroid_difference(centroid1, centroid2, normalize=None):

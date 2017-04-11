@@ -13,13 +13,14 @@ from celery import chord
 from crx_unpack import *
 from requests import HTTPError
 
-from common.crx_conf import conf as _conf
-from common.util import calc_chrome_version, dt_dict_now, MalformedExtId, get_crx_version, \
-    cent_vals_to_dict, make_graph_from_dir, MunchyMunch, PROGRESS_PERIOD
 from common.centroid import calc_centroid
+from common.crx_conf import conf as _conf
+from common.graph import make_graph_from_dir
+from common.util import calc_chrome_version, dt_dict_now, MalformedExtId, get_crx_version, \
+    cent_vals_to_dict, MunchyMunch, PROGRESS_PERIOD
 from crawl.celery import app
-from crawl.webstore_iface import *
 from crawl.db_iface import *
+from crawl.webstore_iface import *
 
 CHROME_VERSION = calc_chrome_version(_conf.version, _conf.release_date)
 DOWNLOAD_URL = _conf.url.format(CHROME_VERSION, '{}')
