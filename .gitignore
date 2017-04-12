@@ -9,4 +9,5 @@ secret/
 .vagrant/
 *.bak
 *.retry
-log
+log/
+docs/

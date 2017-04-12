@@ -7,9 +7,9 @@ from os import path
 
 from munch import *
 
-from common.centroid import USED_FIELDS, USED_TO_DB
+from common.centroid import USED_FIELDS
 from common.clr import add_color_log_levels
-from common.const import mode_to_unix
+from common.const import mode_to_unix, USED_TO_DB
 
 __all__ = ['validate_crx_id', 'MalformedExtId', 'add_color_log_levels', 'get_crx_version', 'calc_chrome_version',
            'get_id_version']
@@ -193,3 +193,19 @@ class MunchyMunch:
         if not kw_done and len(args):
             args = (munchify(args[0]),) + args[1:]
         return self.f(*args, **kwargs)
+
+
+def byte_len(s):
+    """Return the length of `s` in number of bytes.
+    
+    :param str|bytes s: The string or bytes to test.
+    :return: The length of `s` in bytes.
+    :rtype: int
+    :raises: TypeError if `s` is not a str or bytes.
+    """
+    if isinstance(s, str):
+        return len(s.encode())
+    elif isinstance(s, bytes):
+        return len(s)
+    else:
+        raise TypeError('Cannot determine byte length for type {}'.format(type(s)))

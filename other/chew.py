@@ -18,9 +18,8 @@ import subprocess
 from datetime import datetime
 from os import path
 
-from docopt import docopt
-
 import pyuefi
+from docopt import docopt
 
 SEGMENT_SIZE = '10G'
 SECTOR_SIZE = 512

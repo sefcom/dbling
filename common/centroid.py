@@ -5,12 +5,9 @@ from math import ceil, sqrt
 
 from sqlalchemy import Table, select
 
-from common.chrome_db import DB_META, USED_TO_DB
+from common.chrome_db import DB_META
 from common.const import *
 from common.graph import DblingGraph
-
-# USED_FIELDS = ('_c_ctime', '_c_num_child_dirs', '_c_num_child_files', '_c_mode', '_c_depth', '_c_type')
-USED_FIELDS = ('_c_num_child_dirs', '_c_num_child_files', '_c_mode', '_c_depth', '_c_type')
 
 __all__ = ['calc_centroid', 'centroid_difference', 'get_normalizing_vector', 'InvalidCentroidError', 'InvalidTreeError',
            'ISO_TIME', 'USED_FIELDS']
@@ -73,7 +70,8 @@ class CentroidCalc:
         """An object to keep track of calculating a centroid for an extension.
 
         :param DblingGraph sub_tree: The graph object to use to calculate the
-            centroid. Must already have the following vertex properties
+            centroid. In addition to the graph property `has_encrypted_files`,
+            `sub_tree` must already have the following vertex properties
             populated:
 
             - `type`
@@ -94,6 +92,10 @@ class CentroidCalc:
         self.digr.vp['_c_mode'] = self.digr.new_vertex_property('int')
         self.digr.vp['_c_depth'] = self.digr.new_vertex_property('int')
         self.digr.vp['_c_type'] = self.digr.new_vertex_property('int')
+
+        # Making the (safe) assumption that if *any* files in the graph were encrypted, all of the files that are left
+        # must be encrypted.
+        self._has_crypt = self.digr.gp['has_encrypted_files']
 
         self.block_size = block_size
         self.top = get_tree_top(self.digr)
@@ -165,6 +167,8 @@ class CentroidCalc:
         num_child_dirs = 0
         num_child_files = 0
 
+        child_name_lens = []
+
         for child in vertex.out_neighbours():
             # TODO: Make sure the heuristic for resolving multiple types has been written before this is used
             child_type = int(self.digr.vp['type'][child][0])
@@ -173,6 +177,8 @@ class CentroidCalc:
             else:
                 num_child_files += 1
 
+            child_name_lens.append(int(self.digr.vp['filename_b_len'][child]))
+
             self._set_properties(child, depth+1, baseline_time)
 
         # Child numbers
@@ -180,9 +186,10 @@ class CentroidCalc:
         self.digr.vp['_c_num_child_files'][vertex] = num_child_files
 
         # Size
-        size = int(self.digr.vp['filesize'][vertex])  # Get original size first
-        size = int(ceil(size / self.block_size))  # How many blocks does it occupy?
-        self.digr.vp['_c_size'][vertex] = size
+        self.digr.vp['_c_size'][vertex] = self._blocks_used(size=int(self.digr.vp['filesize'][vertex]),
+                                                            f_type=int(self.digr.vp['type'][vertex][0]),
+                                                            child_name_lens=child_name_lens,
+                                                            )
 
         # Permissions
         try:
@@ -213,10 +220,63 @@ class CentroidCalc:
     def size(self):
         return self.digr.num_vertices()
 
+    def _blocks_used(self, size, f_type, child_name_lens):
+        """Calculate the size of a file/dir on disk using its metadata.
+
+        :param int size: The original size of the file.
+        :param int f_type: File type number (Unix-style). The value of this
+            parameter will be compared against the :class:`FType` enum type.
+        :param list child_name_lens: List of the lengths of all the files in a
+            directory *in bytes*. If the current file is not a directory, the
+            list should be empty, but no error will occur if it isn't.
+        :return: Number of blocks occupied by the file.
+        :rtype: int
+        """
+        size = int(size)
+        f_type = int(f_type)
+
+        if f_type == FType.dir:
+            size2 = 0
+            for n in child_name_lens:
+                size2 += dir_entry_size(n, self._has_crypt)
+            # If size2 isn't bigger than size, something went wrong
+            if size > size2:
+                logging.warning('Predicted lower size of a directory was not bigger than the upper size')
+            else:
+                size = size2
+
+        elif type == FType.reg:
+            # eCryptfs adds an 8kb header to regular files
+            size += ECRYPTFS_FILE_HEADER_BYTES
+
+        # Now that we have an accurate size, calculate how many blocks it occupies
+        return int(ceil(size / self.block_size))
+
+
+def dir_entry_size(filename_length, is_encrypted):
+    """Calculate the number of bytes a file occupies in a directory file.
+
+    :param int filename_length: Length of the file's name *in bytes*.
+    :param bool is_encrypted: Whether the filename is already encrypted.
+    :return: Number of bytes the file occupies in a directory file. This
+        includes any padding bytes to make the filename a multiple of four, as
+        well as the bytes taken by other fields in the directory entry.
+    :rtype: int
+    """
+    if not is_encrypted:
+        # Figure out what the encrypted length would be
+        filename_length = ECRYPTFS_SIZE_THRESHOLDS[filename_length >> 4]
+
+    # Make sure the filename length is a multiple of 4
+    if filename_length % 4:
+        filename_length += 4 - (filename_length % 4)
+
+    # Add the size of the directory entry fields and return
+    return DENTRY_FIELD_BYTES + filename_length
+
 
 def get_tree_top(digr):
-    """
-    Traverse the subtree at digr and return the top-most vertex.
+    """Traverse the subtree at digr and return the top-most vertex.
 
     :param digr: Some graph object.
     :type digr: common.graph.DblingGraph

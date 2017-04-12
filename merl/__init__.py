@@ -26,15 +26,15 @@ STARTER = """<?xml version="1.0" encoding="UTF-8"?>
 />"""
 MAX_FAMILY_MATCHES = 1000
 MAX_CANDIDATE_TAGS = 5
-CASE_STUDY = False
 
 
 class Merl:
-    def __init__(self, *, src_image_filename=None, src_mount_point=None, out_fp=None):
+    def __init__(self, *, src_image_filename=None, src_mount_point=None, out_fp=None, plain_output=False):
         self._soup = BeautifulSoup(STARTER, 'xml')
         self._top = self._soup.merl
 
-        self._db_conn = DB_META.bind.connect()
+        conn = DB_META.bind.connect()
+        self._db_conn = conn
         self._extension = Table('extension', DB_META)
         self._cent_fam = Table('centroid_family', DB_META)
         self._norm_vec = get_normalizing_vector()
@@ -44,9 +44,14 @@ class Merl:
         self._centroid_select_fields = self._cent_cols + [self._cent_fam.c.pk]
         self._out_file = None
         self.output_file = out_fp
+        self.plain_output = plain_output
 
         self._make_source_tag(src_image_filename, src_mount_point)
         self._make_creator_tag()
+
+        @atexit.register
+        def close_db():
+            conn.close()
 
     @property
     def merl(self):
@@ -63,18 +68,37 @@ class Merl:
 
     def save_merl(self):
         self.output_file.write(self.merl)
+        print(self.merl, file=self.output_file)
 
-    @atexit.register
     def close_db(self):
         self._db_conn.close()
 
     def match_candidates(self, candidates_list):
+        """Iterate through the list of candidates and find matches.
+        
+        :param list candidates_list: List of graphs that are candidates for
+            being extensions installed on the device.
+        :rtype: None
+        """
         n = 0
         for c in candidates_list:
             n += 1
             self.match_candidate(c, n)
 
     def match_candidate(self, candidate, match_num=None):
+        """Find all matches for a single candidate.
+        
+        Depending on how the program was invoked, this will either print the
+        results in a plain format with no structure (but that is easier to
+        read quickly) or in an XML format conforming to the MERL schema.
+        
+        :param DblingGraph candidate: A graph that is a candidate for being an
+            extension installed on the device.
+        :param int match_num: Number indicating which number of candidate this
+            is in a set of candidates. Note that this number is not an index,
+            since numbering begins at 1.
+        :rtype: None
+        """
         # Iterate through the centroid families table, and get the centroid for the family
         cent = CentroidCalc(candidate)
         # if cent.size < 30:  # TODO: Remove this. There are legit extensions with only 5 nodes.
@@ -133,13 +157,12 @@ class Merl:
 
         sorted_hits = sorted(hit_entries, key=itemgetter('confidence'), reverse=True)
 
-        if CASE_STUDY:
+        if self.plain_output:
             _n = ''
             if match_num is not None:
                 _n = ' (%d)' % match_num
             logging.debug(('Calculated the matches for a candidate graph with %d vertices.' % cent.size) + _n)
 
-            # Add the fields to the MERL file  # TODO
             if match_num is not None:
                 print('\nC%d Candidate Matches' % match_num, file=self.output_file)
                 print('---------------------\n', file=self.output_file)

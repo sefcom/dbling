@@ -15,6 +15,9 @@ CRX_URL = 'https://chrome.google.com/webstore/detail/%s'
 
 ISO_TIME = '%Y-%m-%dT%H:%M:%SZ'
 
+# Number of bytes used by the dir entry fields (preceding the filename)
+DENTRY_FIELD_BYTES = 8
+
 
 class FType(IntEnum):
     """File types as stored in directory entries in ext2, ext3, and ext4."""
@@ -94,3 +97,21 @@ def mode_to_unix(x):
 # The index of these correspond with i such that 16*i is the lower bound and (16*(i+1))-1 is the upper bound for
 # file name lengths that correspond to this value. Anything 16*9=144 or longer is invalid.
 ECRYPTFS_SIZE_THRESHOLDS = (84, 104, 124, 148, 168, 188, 212, 232, 252, float('-inf'))
+
+# Number of bytes used by eCryptfs for its header
+ECRYPTFS_FILE_HEADER_BYTES = 8192
+
+
+# Database info
+
+# USED_FIELDS = ('_c_ctime', '_c_num_child_dirs', '_c_num_child_files', '_c_mode', '_c_depth', '_c_type')
+USED_FIELDS = ('_c_num_child_dirs', '_c_num_child_files', '_c_mode', '_c_depth', '_c_type')
+
+# USED_TO_DB doesn't have the ttl_files field because it's not explicitly stored in the graph object
+USED_TO_DB = {'_c_ctime': 'ctime',
+              '_c_num_child_dirs': 'num_dirs',
+              '_c_num_child_files': 'num_files',
+              '_c_mode': 'perms',
+              '_c_depth': 'depth',
+              '_c_type': 'type',
+              '_c_size': 'size'}

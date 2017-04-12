@@ -433,7 +433,7 @@ class _GraphDiff(object):
                 self.gi[_id] = vertex
                 for a in attrs:
                     if a in ('type', 'src_files'):
-                        self.digr.vp[a][vertex] = (attrs[a])
+                        self.digr.vp[a][vertex] = (attrs[a],)
                     else:
                         self.digr.vp[a][vertex] = attrs[a]
 

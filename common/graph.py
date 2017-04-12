@@ -10,42 +10,45 @@ import graph_tool.all as gt
 from graph_tool.all import graph_draw  # Import this so others have access to it
 
 from common.const import EVAL_NONE, IN_PAT_VAULT, ENC_PAT, MIN_DEPTH, SLICE_PAT, ISO_TIME, TYPE_TO_NAME
-from common.util import separate_mode_type
+from common.util import separate_mode_type, byte_len
 
 
 class DblingGraph(gt.Graph):
 
-    def __init__(self, extended_attrs=False):
-        super().__init__()
+    def __init__(self, extended_attrs=False, g=None, **kwargs):
+        super().__init__(g=g, **kwargs)
 
-        # Create the internal property maps
-        # TODO: Clean this up when the fields are finalized
-        self.vp['inode'] = self.new_vertex_property('int')
-        self.vp['parent_inode'] = self.new_vertex_property('int')
-        self.vp['filename'] = self.new_vertex_property('string')
-        self.vp['filename_id'] = self.new_vertex_property('string')
-        self.vp['filename_end'] = self.new_vertex_property('string')
-        self.vp['filename_b_len'] = self.new_vertex_property('int')  # Length in bytes, as opposed to characters
-        self.vp['name_type'] = self.new_vertex_property('string')
-        self.vp['type'] = self.new_vertex_property('vector<short>')
-        self.vp['filesize'] = self.new_vertex_property('string')
-        self.vp['encrypted'] = self.new_vertex_property('bool')
-        self.vp['eval'] = self.new_vertex_property('bool')
-        self.vp['size'] = self.new_vertex_property('string')
-        self.vp['mode'] = self.new_vertex_property('string')
-        self.vp['uid'] = self.new_vertex_property('string')
-        self.vp['gid'] = self.new_vertex_property('string')
-        self.vp['nlink'] = self.new_vertex_property('string')
-        self.vp['mtime'] = self.new_vertex_property('string')
-        self.vp['ctime'] = self.new_vertex_property('string')
-        self.vp['atime'] = self.new_vertex_property('string')
-        self.vp['dir_depth'] = self.new_vertex_property('short')
-        self.vp['gt_min_depth'] = self.new_vertex_property('bool')
-        self.vp['keeper'] = self.new_vertex_property('bool', val=True)
+        if g is None:
+            # Create the internal property maps
+            # TODO: Clean this up when the fields are finalized
+            self.vp['inode'] = self.new_vertex_property('int')
+            self.vp['parent_inode'] = self.new_vertex_property('int')
+            self.vp['filename'] = self.new_vertex_property('string')
+            self.vp['filename_id'] = self.new_vertex_property('string')
+            self.vp['filename_end'] = self.new_vertex_property('string')
+            self.vp['filename_b_len'] = self.new_vertex_property('int')  # Length in bytes, as opposed to characters
+            self.vp['name_type'] = self.new_vertex_property('string')
+            self.vp['type'] = self.new_vertex_property('vector<short>')
+            self.vp['filesize'] = self.new_vertex_property('string')
+            self.vp['encrypted'] = self.new_vertex_property('bool')
+            self.vp['eval'] = self.new_vertex_property('bool')
+            self.vp['size'] = self.new_vertex_property('string')
+            self.vp['mode'] = self.new_vertex_property('string')
+            self.vp['uid'] = self.new_vertex_property('string')
+            self.vp['gid'] = self.new_vertex_property('string')
+            self.vp['nlink'] = self.new_vertex_property('string')
+            self.vp['mtime'] = self.new_vertex_property('string')
+            self.vp['ctime'] = self.new_vertex_property('string')
+            self.vp['atime'] = self.new_vertex_property('string')
+            self.vp['dir_depth'] = self.new_vertex_property('short')
+            self.vp['gt_min_depth'] = self.new_vertex_property('bool')
+            self.vp['keeper'] = self.new_vertex_property('bool', val=True)
 
-        self.has_extended_attrs = False
-        if extended_attrs:
-            self.init_extended_attrs()
+            self.gp['has_encrypted_files'] = self.new_graph_property('bool', False)
+
+            self.has_extended_attrs = False
+            if extended_attrs:
+                self.init_extended_attrs()
 
     def init_extended_attrs(self):
         if not self.has_extended_attrs:  # Only do this once
@@ -59,6 +62,9 @@ class DblingGraph(gt.Graph):
 
             self.has_extended_attrs = True
 
+    def copy(self):
+        return DblingGraph(g=self)
+
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
 
@@ -71,10 +77,8 @@ def make_graph_from_dir(top_dir, digr=None):
     Given a directory path, create and return a directed graph representing it
     and all its contents.
 
-    :param top_dir: Path to the top-most directory to add to the graph.
-    :type top_dir: str
-    :param digr: If given, start with a previously created graph.
-    :type digr: DblingGraph
+    :param str top_dir: Path to the top-most directory to add to the graph.
+    :param DblingGraph digr: If given, start with a previously created graph.
     :return: The graph object with all the information about the directory.
     :rtype: DblingGraph
     """
@@ -113,16 +117,13 @@ def set_vertex_props(digraph, vertex, filename, slice_path=False):
     vertex properties of the graph the vertex belongs to. Return the SHA256
     hash of the file's full, normalized path.
 
-    :param digraph: The graph the vertex belongs to.
-    :type digraph: common.graph.DblingGraph
+    :param DblingGraph digraph: The graph the vertex belongs to.
     :param vertex: The vertex object that will correspond with the file.
     :type vertex: graph_tool.all.Vertex
-    :param filename: The path to the file.
-    :type filename: str
-    :param slice_path: When set, filename will be run through the SLICE_PAT
+    :param str filename: The path to the file.
+    :param bool slice_path: When set, filename will be run through the SLICE_PAT
         before determining its depth. Can't remember what the advantage of
         this is though...
-    :type slice_path: bool
     :return: SHA256 hash of the file's full, normalized path. (hex digest)
     :rtype: str
     """
@@ -152,6 +153,7 @@ def set_vertex_props(digraph, vertex, filename, slice_path=False):
     digraph.vp['filename'][vertex] = filename
     digraph.vp['filename_id'][vertex] = filename_id
     digraph.vp['filename_end'][vertex] = path.basename(filename[-13:])
+    digraph.vp['filename_b_len'][vertex] = byte_len(path.basename(filename))
     digraph.vp['name_type'][vertex] = TYPE_TO_NAME[t]
     digraph.vp['type'][vertex] = (t,)
     digraph.vp['filesize'][vertex] = str(st.st_size)
@@ -167,6 +169,10 @@ def set_vertex_props(digraph, vertex, filename, slice_path=False):
     digraph.vp['mtime'][vertex] = datetime.fromtimestamp(st.st_mtime).strftime(ISO_TIME)
     digraph.vp['ctime'][vertex] = datetime.fromtimestamp(st.st_ctime).strftime(ISO_TIME)
     digraph.vp['atime'][vertex] = datetime.fromtimestamp(st.st_atime).strftime(ISO_TIME)
+
+    if digraph.vp['encrypted'][vertex]:
+        digraph.gp['has_encrypted_files'] = True
+
     return filename_id
 
 

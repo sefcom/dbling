@@ -8,13 +8,13 @@
 # your tasks are mostly I/O-bound then you can try to increase it, experimentation has shown that adding more than
 # twice the number of CPU’s is rarely effective, and likely to degrade performance instead.
 
-from celery.schedules import crontab
 from copy import copy
 from datetime import timedelta
 
-from secret.creds import admin_emails, sender_email_addr, celery_login
-from common.log import log_setup
+from celery.schedules import crontab
 
+from common.log import log_setup
+from secret.creds import admin_emails, sender_email_addr, celery_login
 
 BROKER_URL = 'amqp://{user}:{pass}@dbling:{port}'.format(**celery_login)
 CELERY_RESULT_BACKEND = 'amqp://{user}:{pass}@dbling:{port}'.format(**celery_login)

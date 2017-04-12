@@ -39,14 +39,6 @@ else:
     DB_ENGINE = engine_from_config(db_conf)
 
 DB_META = MetaData(bind=DB_ENGINE)
-# USED_TO_DB doesn't have the ttl_files field because it's not explicitly stored in the graph object
-USED_TO_DB = {'_c_ctime': 'ctime',
-              '_c_num_child_dirs': 'num_dirs',
-              '_c_num_child_files': 'num_files',
-              '_c_mode': 'perms',
-              '_c_depth': 'depth',
-              '_c_type': 'type',
-              '_c_size': 'size'}
 
 # Create the extension table
 extension = Table('extension', DB_META,
