@@ -86,7 +86,7 @@ class CentroidCalc:
         self.digr = sub_tree
         self.digr.gp['centroid'] = self.digr.new_graph_property('vector<float>')
         self.digr.vp['_c_size'] = self.digr.new_vertex_property('int')
-        self.digr.vp['_c_ctime'] = self.digr.new_vertex_property('int')
+        # self.digr.vp['_c_ctime'] = self.digr.new_vertex_property('int')  # Removed because it wasn't helping things
         self.digr.vp['_c_num_child_dirs'] = self.digr.new_vertex_property('int')
         self.digr.vp['_c_num_child_files'] = self.digr.new_vertex_property('int')
         self.digr.vp['_c_mode'] = self.digr.new_vertex_property('int')
@@ -100,7 +100,7 @@ class CentroidCalc:
         self.block_size = block_size
         self.top = get_tree_top(self.digr)
         self._cent_calculated = False
-        logging.debug('Created CentroidCalc object with %d vertices.' % self.digr.num_vertices())
+        # logging.debug('Created CentroidCalc object with %d vertices.' % self.digr.num_vertices())
 
     def do_calc(self):
         """Calculate the centroid for the tree.
@@ -162,7 +162,7 @@ class CentroidCalc:
             baseline_time = ctime
 
         # Calculate relative time difference
-        self.digr.vp['_c_ctime'][vertex] = ctime - baseline_time
+        # self.digr.vp['_c_ctime'][vertex] = ctime - baseline_time
 
         num_child_dirs = 0
         num_child_files = 0
@@ -235,10 +235,15 @@ class CentroidCalc:
         size = int(size)
         f_type = int(f_type)
 
+        if self._has_crypt:
+            # If we're working with encrypted files, we don't need to do all the fancy calculations below. Those are
+            # for *predicting* the size after encryption. If it's already encrypted, we don't need to predict.
+            return int(ceil(size / self.block_size))
+
         if f_type == FType.dir:
             size2 = 0
             for n in child_name_lens:
-                size2 += dir_entry_size(n, self._has_crypt)
+                size2 += dir_entry_size(n)
             # If size2 isn't bigger than size, something went wrong
             if size > size2:
                 logging.warning('Predicted lower size of a directory was not bigger than the upper size')
@@ -253,7 +258,7 @@ class CentroidCalc:
         return int(ceil(size / self.block_size))
 
 
-def dir_entry_size(filename_length, is_encrypted):
+def dir_entry_size(filename_length, is_encrypted=False):
     """Calculate the number of bytes a file occupies in a directory file.
 
     :param int filename_length: Length of the file's name *in bytes*.
