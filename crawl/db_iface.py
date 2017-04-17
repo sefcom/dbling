@@ -95,8 +95,8 @@ def db_download_complete(crx_obj, log_progress=False):
     if row:
         # Entry exists. First update the last known available datetime.
         u = extension.update().where(and_(extension.c.ext_id == crx_obj.id,
-                                          extension.c.version == crx_obj.version)). \
-            values(last_known_available=dict_to_dt(crx_obj.dt_avail))
+                                          extension.c.version == crx_obj.version)
+                                     ).values(last_known_available=dict_to_dt(crx_obj.dt_avail))
         _execute_and_commit(db_session, u)
         log('{} [{}/{}]  Updated last known available datetime after downloading'.
             format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
@@ -121,7 +121,7 @@ def db_download_complete(crx_obj, log_progress=False):
 def db_extract_complete(crx_obj, log_progress=False):
     """Update the database with information on the extracted extension.
 
-    The two columns whose values are updated are `last_known_available` and
+    The columns whose values are updated are `name`, `m_version`, and
     `extracted`.
 
     :param crx_obj: All current information about the CRX, which must include
@@ -136,12 +136,11 @@ def db_extract_complete(crx_obj, log_progress=False):
     log = logging.info if bool(log_progress) else logging.debug
 
     u = extension.update().where(and_(extension.c.ext_id == crx_obj.id,
-                                      extension.c.version == crx_obj.version)). \
-        values(last_known_available=dict_to_dt(crx_obj.dt_avail),
-               extracted=dict_to_dt(crx_obj.dt_extracted),
-               name=crx_obj.name,
-               m_version=crx_obj.m_version,
-               )
+                                      extension.c.version == crx_obj.version)
+                                 ).values(extracted=dict_to_dt(crx_obj.dt_extracted),
+                                          name=crx_obj.name,
+                                          m_version=crx_obj.m_version,
+                                          )
     _execute_and_commit(db_session, u)
     log('{} [{}/{}]  Updated DB after extracting extension'.format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
 
@@ -186,8 +185,9 @@ def db_profile_complete(crx_obj, log_progress=False, update_dt_avail=True):
         crx_obj.cent_dict['last_known_available'] = dict_to_dt(crx_obj.dt_avail)
 
     # Update the DB with values from cent_dict
-    u = extension.update().where(and_(extension.c.ext_id == crx_obj.id, extension.c.version == crx_obj.version)). \
-        values(crx_obj.cent_dict)
+    u = extension.update().where(and_(extension.c.ext_id == crx_obj.id,
+                                      extension.c.version == crx_obj.version)
+                                 ).values(crx_obj.cent_dict)
     _execute_and_commit(db_session, u)
 
     # Create a stats message indicating what happened

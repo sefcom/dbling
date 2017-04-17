@@ -6,12 +6,14 @@ Initialize the database by ensuring the engine is instantiated and the
 
 from os import path, uname
 
-from sqlalchemy import create_engine, engine_from_config, MetaData, Table, Column, Integer, String, DateTime, Float, \
+from sqlalchemy import create_engine, engine_from_config, MetaData, Table, Column, Integer, DateTime, Float, \
     Index, ForeignKey
+from sqlalchemy.dialects.mysql import VARCHAR
 
 from common.crx_conf import conf as _conf
+from common.const import EXT_NAME_LEN_MAX
 
-__all__ = ['DB_ENGINE', 'DB_META', 'USED_TO_DB']
+__all__ = ['DB_ENGINE', 'DB_META']
 
 db_conf = _conf['db']
 
@@ -43,10 +45,10 @@ DB_META = MetaData(bind=DB_ENGINE)
 # Create the extension table
 extension = Table('extension', DB_META,
                   Column('pk', Integer, primary_key=True),
-                  Column('ext_id', String(32)),
-                  Column('version', String(23)),  # See https://developer.chrome.com/extensions/manifest/version
-                  Column('m_version', String(23)),  # Version as specified in the manifest.
-                  Column('name', String(45)),  # See https://developer.chrome.com/extensions/manifest/name#name
+                  Column('ext_id', VARCHAR(32, charset='utf8mb4', collation='utf8mb4_unicode_ci')),
+                  Column('version', VARCHAR(23, charset='utf8mb4', collation='utf8mb4_unicode_ci')),  # See https://developer.chrome.com/extensions/manifest/version
+                  Column('m_version', VARCHAR(23, charset='utf8mb4', collation='utf8mb4_unicode_ci')),  # Version as specified in the manifest.
+                  Column('name', VARCHAR(EXT_NAME_LEN_MAX, charset='utf8mb4', collation='utf8mb4_unicode_ci')),  # See https://developer.chrome.com/extensions/manifest/name#name
                   Column('last_known_available', DateTime(True)),
                   Column('last_known_unavailable', DateTime(True)),
                   Column('downloaded', DateTime(True)),
@@ -79,15 +81,19 @@ extension = Table('extension', DB_META,
 
                   # Other settings
                   extend_existing=True,  # Adds new columns to backend DB table if necessary (user must have ALTER perm)
+                  mysql_engine='InnoDB',
+                  mysql_default_charset='utf8mb4',
                   )
 extension.create(checkfirst=True)
 
 # Create the id_list table
 id_list = Table('id_list', DB_META,
-                Column('ext_id', String(32), primary_key=True),
+                Column('ext_id', VARCHAR(32, charset='utf8mb4', collation='utf8mb4_unicode_ci'), primary_key=True),
 
                 # Other settings
                 extend_existing=True,
+                mysql_engine='InnoDB',
+                mysql_default_charset='utf8mb4',
                 )
 id_list.create(checkfirst=True)
 
@@ -116,5 +122,7 @@ cent_fam = Table('centroid_family', DB_META,
 
                  # Other settings
                  extend_existing=True,
+                 mysql_engine='InnoDB',
+                 mysql_default_charset='utf8mb4',
                  )
 cent_fam.create(checkfirst=True)

@@ -22,6 +22,7 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_CHORD_PROPAGATES = False  # If a task fails, send the exception value to the callback, don't just give up
+CELERY_TASK_RESULT_EXPIRES = timedelta(days=4)
 # CELERY_TASK_RESULT_EXPIRES = 60*10  # Expire results after 10 minutes # TODO: Remove this after initial testing
 
 # Acknowledge tasks only once they've completed. If the worker crashes, the job will be requeued.
@@ -45,7 +46,7 @@ SERVER_EMAIL = sender_email_addr
 CELERYBEAT_SCHEDULE = {
     'download-every-12-hrs': {
         'task': 'crawl.tasks.start_list_download',
-        'schedule': crontab(minute=42, hour='9,21'),
+        # 'schedule': crontab(minute=42, hour='9,21'),
         # 'schedule': timedelta(seconds=20),
     },
 }

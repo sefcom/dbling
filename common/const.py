@@ -115,3 +115,5 @@ USED_TO_DB = {'_c_ctime': 'ctime',
               '_c_depth': 'depth',
               '_c_type': 'type',
               '_c_size': 'size'}
+
+EXT_NAME_LEN_MAX = 45

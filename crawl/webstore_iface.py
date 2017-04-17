@@ -16,7 +16,8 @@ from lxml import etree
 from requests import ConnectionError
 from requests.exceptions import ChunkedEncodingError, HTTPError
 
-from common.util import validate_crx_id, get_crx_version, CRX_URL, make_download_headers
+from common.util import validate_crx_id, get_crx_version, make_download_headers
+from common.const import CRX_URL
 
 __all__ = ['DownloadCRXList', 'save_crx', 'ListDownloadFailedError', 'ExtensionUnavailable', 'BadDownloadURL',
            'VersionExtractError']

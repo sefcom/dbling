@@ -5,7 +5,8 @@ from __future__ import absolute_import
 import logging
 from datetime import timedelta
 from json import dumps, load
-from os import path
+from json.decoder import JSONDecodeError
+from os import path, listdir
 from tempfile import TemporaryDirectory
 from time import perf_counter
 
@@ -14,10 +15,11 @@ from crx_unpack import *
 from requests import HTTPError
 
 from common.centroid import calc_centroid
+from common.const import EXT_NAME_LEN_MAX
 from common.crx_conf import conf as _conf
 from common.graph import make_graph_from_dir
-from common.util import calc_chrome_version, dt_dict_now, MalformedExtId, get_crx_version, \
-    cent_vals_to_dict, MunchyMunch, PROGRESS_PERIOD
+from common.util import calc_chrome_version, dt_dict_now, MalformedExtId, get_crx_version, cent_vals_to_dict, \
+    MunchyMunch, PROGRESS_PERIOD, ttl_files_in_dir, get_id_version
 from crawl.celery import app
 from crawl.db_iface import *
 from crawl.webstore_iface import *
@@ -26,6 +28,13 @@ CHROME_VERSION = calc_chrome_version(_conf.version, _conf.release_date)
 DOWNLOAD_URL = _conf.url.format(CHROME_VERSION, '{}')
 
 TESTING = READ_ONLY
+
+
+##################
+#
+#   Beat Tasks
+#
+##################
 
 
 @app.task(send_error_emails=True)
@@ -94,6 +103,41 @@ def start_list_download():
            for crx, num in crx_list), summarize_job.s())()
 
 
+@app.task(send_error_emails=True, base=SqlAlchemyTask)
+def start_redo_extract_profile():
+    """Start re-profiling process on the CRXs already downloaded.
+
+    Adds the following keys to `crx_obj` (from `crxs_on_disk`):
+
+    - `id`: The 32 character ID of the extension.
+    - `version`: Version number of the extension, as obtained from the final
+      URL of the download. This may differ from the version listed in the
+      extension's manifest.
+    - `msgs`: Array of progress messages. These strings are what are compiled
+      by `summarize_job` to report on the work done.
+    - `job_num`: Index within the current crawl. Although we don't have any
+      guarantee that the extensions will be profiled precisely in order, this
+      gives tasks processing an extension some idea of how far along in the
+      crawl things are. This allows us to do subjective logging (log progress
+      only if the job number % 1000 == 0) at higher levels to keep any watching
+      users apprised of progress without too many log entries.
+    - `job_ttl`: Total number of CRXs that will be processed; equal to the
+      number of IDs in the downloaded list of extensions.
+    - `filename`: The basename of the CRX file (not the full path)
+    - `full_path`: The location (full path) of the downloaded CRX file
+    """
+    # Using the `crxs_on_disk` generator, send all the CRXs to be queued, then summarize the results
+    logging.info('Beginning re-profiling process of all CRXs already downloaded.')
+    chord((redo_extract_profile.s(crx_obj) for crx_obj in crxs_on_disk()), summarize_job.s())()
+
+
+#####################
+#
+#   Entry Points
+#
+#####################
+
+
 @app.task(base=SqlAlchemyTask)
 @MunchyMunch
 def process_crx(crx_obj):
@@ -125,7 +169,7 @@ def process_crx(crx_obj):
     :return: Error or success message describing status. These messages from
         all of the process_crx() tasks are synchronized and then sent to be
         summarized by the summarize_job() task.
-    :rtype: str
+    :rtype: list
     """
     # This flag tells us if any error occur that are bad enough we should stop processing the CRX
     crx_obj.stop_processing = False
@@ -146,7 +190,51 @@ def process_crx(crx_obj):
     return crx_obj.msgs
 
 
-# TODO: Add other tasks similar to process_crx() that only do the last two or one stages
+@app.task(base=SqlAlchemyTask)
+@MunchyMunch
+def redo_extract_profile(crx_obj):
+    """Control the re-profiling steps of extraction and profiling for a CRX.
+
+    Functions very similarly to the :func:`process_crx` task, so it may be
+    helpful to refer to its documentation.
+
+    Adds the following keys to `crx_obj`:
+
+    - `extracted_path`: Temporary dir that will be the location of the unpacked
+      extension files.
+    - `stop_processing`: Flag indicating an error during processing.
+
+    :param crx_obj: Details of a single CRX, which gets updated at every step.
+    :type crx_obj: Munch
+    :return: Error or success message describing status. These messages from
+        all of the redo_extract_profile() tasks are synchronized and then sent
+        to be summarized by the summarize_job() task.
+    :rtype: list
+    """
+    # This flag tells us if any error occur that are bad enough we should stop processing the CRX
+    crx_obj.stop_processing = False
+
+    with TemporaryDirectory(dir=_conf.extract_dir) as extracted_path:
+        # This temporary directory will only exist within this "with" clause
+        crx_obj.extracted_path = extracted_path
+
+        # The two re-profiling steps
+        for step in (extract_crx, profile_crx):
+            crx_obj = step(crx_obj, re_profiling=True)
+            if crx_obj.stop_processing:
+                break
+
+    log = logging.info if not (crx_obj.job_num % PROGRESS_PERIOD) else logging.debug
+    log('{} [{}/{}]  Completed re-profiling CRX'.format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
+
+    return crx_obj.msgs
+
+
+#######################
+#
+#   Worker Functions
+#
+#######################
 
 
 def download_crx(crx_obj):
@@ -158,6 +246,8 @@ def download_crx(crx_obj):
     - `version`: Version number of the extension. Typically set in `save_crx`.
       Only set here if a duplicate download was detected by
       `db_download_complete`.
+    - `filename`: Base name of the CRX, in format <id>_<version>.crx (set in
+      :func:`save_crx`).
     - `full_path`: Location of CRX. Typically set in `save_crx`. Only set here
       if a duplicate download was detected by `db_download_complete`.
 
@@ -246,7 +336,7 @@ def download_crx(crx_obj):
     return crx_obj
 
 
-def extract_crx(crx_obj):
+def extract_crx(crx_obj, **kwargs):
     """Unpack (extract) the CRX, process any errors.
 
     Adds the following key to `crx_obj`:
@@ -274,7 +364,7 @@ def extract_crx(crx_obj):
         crx_obj.msgs.append("|Failed to overwrite an existing Zip file, but didn't crash")
 
     except BadCrxHeader:
-        logging.warning('{} [{}/{}]  CRX had an invalid header'.format(crx_obj.id, crx_obj.job_number, crx_obj.job_ttl))
+        logging.warning('{} [{}/{}]  CRX had an invalid header'.format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
         crx_obj.msgs.append('-CRX header failed validation')
         crx_obj.stop_processing = True
 
@@ -301,6 +391,10 @@ def extract_crx(crx_obj):
                         format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl), exc_info=1)
         crx_obj.msgs.append('-Unpacking Zip file failed due to a NotADirectoryError')
         crx_obj.stop_processing = True
+
+    except OSError:
+        logging.error('Info on badly-named CRX:\n{}'.format(crx_obj))
+        raise
 
     except:
         logging.critical('{} [{}/{}]  An unknown error occurred while unpacking'.
@@ -334,16 +428,32 @@ def read_manifest(crx_obj):
     :rtype: munch.Munch
     """
     # Open manifest file from extracted dir and get name and version of the extension
-    with open(path.join(crx_obj.extracted_path, 'manifest.json')) as manifest_file:
-        manifest = load(manifest_file)
+    try:
+        with open(path.join(crx_obj.extracted_path, 'manifest.json')) as manifest_file:
+            manifest = load(manifest_file)
+    except JSONDecodeError:
+        # The JSON file must have a Byte Order Marking (BOM) character. Try a different encoding that can handle this.
+        try:
+            with open(path.join(crx_obj.extracted_path, 'manifest.json'), encoding='utf-8-sig') as manifest_file:
+                manifest = load(manifest_file)
+        except JSONDecodeError:
+            # Must be some invalid control characters still present. Just leave the name and version NULL.
+            crx_obj.name = None
+            crx_obj.m_version = None
+            crx_obj.msgs.append('-Error decoding manifest due to JSON decoding error')
+            logging.warning('{id} [{job_num}/{job_ttl}]  Error decoding manifest due to JSON decoding error'.
+                            format(**crx_obj))
+            return crx_obj
+        else:
+            crx_obj.msgs.append('|Manifest (JSON) contained BOM character, had to alter encoding')
 
-    crx_obj.name = manifest['name']
+    crx_obj.name = manifest['name'][:EXT_NAME_LEN_MAX]  # Truncate in case name has invalid length
     crx_obj.m_version = manifest['version']
 
     return crx_obj
 
 
-def profile_crx(crx_obj):
+def profile_crx(crx_obj, re_profiling=False):
     """Calculate a profile (centroid) using the extension's extracted files.
 
     Adds the following keys to `crx_obj`:
@@ -363,8 +473,11 @@ def profile_crx(crx_obj):
 
     This calls :ref:`db_profile_complete` which also adds keys to `cent_dict`.
 
-    :param crx_obj: Previously collected information about the extension.
-    :type crx_obj: munch.Munch
+    :param munch.Munch crx_obj: Previously collected information about the
+        extension.
+    :param bool re_profiling: Set when we're re-profiling downloaded
+        extensions. This keeps the database interface from attempting to update
+        the `dt_avail` field.
     :return: Updated version of `crx_obj`.
     :rtype: munch.Munch
     """
@@ -377,7 +490,14 @@ def profile_crx(crx_obj):
     logging.debug('{} [{}/{}]  Centroid calculation'.format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
     crx_obj.dt_profiled = dt_dict_now()
 
-    return db_profile_complete(crx_obj)
+    return db_profile_complete(crx_obj, update_dt_avail=not re_profiling)
+
+
+##################################
+#
+#   Helper Tasks and Functions
+#
+##################################
 
 
 @app.task
@@ -431,3 +551,40 @@ def summarize_job(sub_jobs):
         # Raised when running on a machine that doesn't accept SMTP connections
         pass
     logging.warning('{}\n{}'.format(subject, body))
+
+
+def crxs_on_disk(crx_dir=_conf.save_path):
+    """Generate crx_obj dicts for CRXs already downloaded to `crx_dir`.
+
+    :param str crx_dir: Directory where the CRXs are saved when downloaded.
+    :return: Dict with the following keys:
+
+        - `id`
+        - `version`
+        - `msgs`
+        - `job_num`
+        - `job_ttl`
+        - `filename`
+        - `full_path`
+    :rtype: dict
+    """
+    ttl = ttl_files_in_dir(crx_dir, pat='crx')
+    logging.info('Total number of CRXs on disk: {}'.format(ttl))
+    num = 0
+
+    for filename in listdir(crx_dir):
+        if filename == '0' or filename.rfind('.crx', -4) == -1:
+            continue
+
+        num += 1
+        crx, version = get_id_version(filename)
+
+        yield {
+            'id': crx,
+            'version': version,
+            'msgs': [],
+            'job_num': num,
+            'job_ttl': ttl,
+            'filename': filename,
+            'full_path': path.join(crx_dir, filename),
+        }

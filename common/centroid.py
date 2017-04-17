@@ -246,7 +246,7 @@ class CentroidCalc:
                 size2 += dir_entry_size(n)
             # If size2 isn't bigger than size, something went wrong
             if size > size2:
-                logging.warning('Predicted lower size of a directory was not bigger than the upper size')
+                logging.debug('Predicted lower size of a directory was not bigger than the upper size')
             else:
                 size = size2
 

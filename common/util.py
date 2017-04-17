@@ -4,6 +4,7 @@
 import stat
 from datetime import datetime, date, timedelta
 from os import path
+from subprocess import check_output
 
 from munch import *
 
@@ -15,7 +16,7 @@ __all__ = ['validate_crx_id', 'MalformedExtId', 'add_color_log_levels', 'get_crx
            'get_id_version']
 
 
-PROGRESS_PERIOD = 1000
+PROGRESS_PERIOD = 100
 
 
 def validate_crx_id(crx_id):
@@ -67,8 +68,7 @@ def get_crx_version(crx_path):
 
 
 def get_id_version(crx_path):
-    """
-    From the path to a CRX, extract and return the ID and version as a string.
+    """From the path to a CRX, extract and return the ID and version as strings.
 
     :param crx_path: The full path to the downloaded CRX.
     :type crx_path: str
@@ -197,7 +197,7 @@ class MunchyMunch:
 
 def byte_len(s):
     """Return the length of `s` in number of bytes.
-    
+
     :param str|bytes s: The string or bytes to test.
     :return: The length of `s` in bytes.
     :rtype: int
@@ -209,3 +209,26 @@ def byte_len(s):
         return len(s)
     else:
         raise TypeError('Cannot determine byte length for type {}'.format(type(s)))
+
+
+def ttl_files_in_dir(dir_path, pat='.'):
+    """Count the files in the given directory.
+
+    Will count all files except `.` and `..`, including any files whose names
+    begin with `.` (using the `-A` option of `ls`).
+
+    :param str dir_path: Path to the directory.
+    :param str pat: Pattern the files should match when searching. This is
+        passed to `grep`, so when the default remains ".", it will match all
+        files and thus not filter out anything.
+    :return: The number of files in the directory.
+    :rtype: int
+    :raises: NotADirectoryError When `dir_path` is not a directory.
+    """
+    if not path.isdir(dir_path):
+        raise NotADirectoryError
+
+    # In a subprocess, count list the files in the dir and count them, convert output to an int
+    ttl = int(check_output('ls -A -U --color=never {} | grep {} | wc -l'.format(dir_path, pat), shell=True).strip())
+
+    return ttl

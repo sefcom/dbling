@@ -5,6 +5,7 @@
 - hosts: crawlers
   vars:
     code_dir: /home/ubuntu/dbling2
+#    code_dir: /home/ubuntu/dbling
     mgt_ip: 10.90.90.227
   remote_user: ubuntu
 
@@ -301,17 +302,18 @@
     become: yes
 
   - name: enable RabbitMQ management console
-    command: rabbitmq-plugins enable rabbitmq_management
+    rabbitmq_plugin:
+      name: rabbitmq_management
+      state: enabled
     become: yes
-    register: plugin_enabled_output
+    register: plugin_enabled
 
   - name: Checking if the RabbitMQ management console was already enabled, restarting rabbitmq-server if it wasn't
     service:
       name: rabbitmq-server
       state: restarted
-    when: plugin_enabled_output.stdout.find('Plugin configuration has changed') != -1
-    # The above string will appear in the output only when the console wasn't already enabled, so only in that case
-    # do we need to restart RabbitMQ.
+    become: yes
+    when: plugin_enabled.changed
 
   #
   #  Celery beat service setup and configuration
