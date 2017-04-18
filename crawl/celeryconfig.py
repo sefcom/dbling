@@ -16,8 +16,8 @@ from celery.schedules import crontab
 from common.log import log_setup
 from secret.creds import admin_emails, sender_email_addr, celery_login
 
-BROKER_URL = 'amqp://{user}:{pass}@dbling:{port}'.format(**celery_login)
-CELERY_RESULT_BACKEND = 'amqp://{user}:{pass}@dbling:{port}'.format(**celery_login)
+BROKER_URL = 'amqp://{user}:{pass}@dbling-msg:{port}'.format(**celery_login)
+CELERY_RESULT_BACKEND = 'amqp://{user}:{pass}@dbling-msg:{port}'.format(**celery_login)
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_ACCEPT_CONTENT = ['json']

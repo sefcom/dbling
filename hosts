@@ -1,4 +1,10 @@
-[crawl-masters]
+[crawl-msg-server]
+dbling-master  ansible_host=dbling
+
+[crawl-db-server]
+dbling-master  ansible_host=dbling
+
+[crawl-crx-server]
 dbling-master  ansible_host=dbling
 
 [crawl-workers]
@@ -7,10 +13,18 @@ dbling-wk2     ansible_host=dbling2
 dbling-wk3     ansible_host=dbling3
 
 [crawlers:children]
-crawl-masters
+crawl-msg-server
+crawl-db-server
+crawl-crx-server
 crawl-workers
 
 [crawlers:vars]
+msg_ip=10.90.90.227
+msg_host=dbling-msg
+db_ip=10.90.90.227
+db_host=dbling-db
+crx_ip=10.90.90.227
+crx_host=dbling-crx
 ansible_connection=ssh
 ansible_user=ubuntu
 ansible_python_interpreter=/usr/bin/python3
