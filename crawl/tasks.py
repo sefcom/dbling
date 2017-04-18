@@ -1,7 +1,5 @@
 # *-* coding: utf-8 *-*
 
-from __future__ import absolute_import
-
 import logging
 from datetime import timedelta
 from json import dumps, load
@@ -23,6 +21,7 @@ from common.util import calc_chrome_version, dt_dict_now, MalformedExtId, get_cr
 from crawl.celery import app
 from crawl.db_iface import *
 from crawl.webstore_iface import *
+from common.enc_temp_dir import EncryptedTempDirectory
 
 CHROME_VERSION = calc_chrome_version(_conf.version, _conf.release_date)
 DOWNLOAD_URL = _conf.url.format(CHROME_VERSION, '{}')
@@ -160,8 +159,11 @@ def process_crx(crx_obj):
 
     Adds the following keys to `crx_obj`:
 
-    - `extracted_path`: Temporary dir that will be the location of the unpacked
-      extension files.
+    - `extracted_path`: Temporary dir where the extension's files will be
+      unpacked.
+    - `enc_extracted_path`: Encrypted temporary dir that eCryptfs will mount
+      to the `extracted_path`. This is the directory that will be used for
+      profiling the extension.
     - `stop_processing`: Flag indicating an error during processing.
 
     :param crx_obj: Details of a single CRX, which gets updated at every step.
@@ -174,9 +176,11 @@ def process_crx(crx_obj):
     # This flag tells us if any error occur that are bad enough we should stop processing the CRX
     crx_obj.stop_processing = False
 
-    with TemporaryDirectory(dir=_conf.extract_dir) as extracted_path:
-        # This temporary directory will only exist within this "with" clause
+    with TemporaryDirectory(dir=_conf.extract_dir) as extracted_path, \
+            EncryptedTempDirectory(dir=_conf.extract_dir, upper_dir=extracted_path) as enc_extracted_path:
+        # These temporary directories will only exist within this "with" clause
         crx_obj.extracted_path = extracted_path
+        crx_obj.enc_extracted_path = enc_extracted_path
 
         # The three steps
         for step in (download_crx, extract_crx, profile_crx):
@@ -200,8 +204,11 @@ def redo_extract_profile(crx_obj):
 
     Adds the following keys to `crx_obj`:
 
-    - `extracted_path`: Temporary dir that will be the location of the unpacked
-      extension files.
+    - `extracted_path`: Temporary dir where the extension's files will be
+      unpacked.
+    - `enc_extracted_path`: Encrypted temporary dir that eCryptfs will mount
+      to the `extracted_path`. This is the directory that will be used for
+      profiling the extension.
     - `stop_processing`: Flag indicating an error during processing.
 
     :param crx_obj: Details of a single CRX, which gets updated at every step.
@@ -214,9 +221,11 @@ def redo_extract_profile(crx_obj):
     # This flag tells us if any error occur that are bad enough we should stop processing the CRX
     crx_obj.stop_processing = False
 
-    with TemporaryDirectory(dir=_conf.extract_dir) as extracted_path:
-        # This temporary directory will only exist within this "with" clause
+    with TemporaryDirectory(dir=_conf.extract_dir) as extracted_path,\
+            EncryptedTempDirectory(dir=_conf.extract_dir, upper_dir=extracted_path) as enc_extracted_path:
+        # These temporary directories will only exist within this "with" clause
         crx_obj.extracted_path = extracted_path
+        crx_obj.enc_extracted_path = enc_extracted_path
 
         # The two re-profiling steps
         for step in (extract_crx, profile_crx):
@@ -482,7 +491,7 @@ def profile_crx(crx_obj, re_profiling=False):
     :rtype: munch.Munch
     """
     # Generate graph from directory and centroid from the graph
-    dir_graph = make_graph_from_dir(crx_obj.extracted_path)
+    dir_graph = make_graph_from_dir(crx_obj.enc_extracted_path)
     cent_vals = calc_centroid(dir_graph)
     crx_obj.cent_dict = cent_vals_to_dict(cent_vals)
 

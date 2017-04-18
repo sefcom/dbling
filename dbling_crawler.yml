@@ -447,3 +447,11 @@
       state: started
     become: yes
     when: not service_celeryd.changed
+
+  - name: ensure home directory for celery exists (needed for eCryptfs)
+    file:
+      dest: /home/celery
+      state: directory
+      owner: celery
+      group: celery
+    become: yes
