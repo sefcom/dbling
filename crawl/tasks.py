@@ -10,6 +10,7 @@ from time import perf_counter
 
 from celery import chord
 from crx_unpack import *
+from crx_unpack.encrypted_dir import EncryptedTempDirectory
 from requests import HTTPError
 
 from common.centroid import calc_centroid
@@ -21,7 +22,6 @@ from common.util import calc_chrome_version, dt_dict_now, MalformedExtId, get_cr
 from crawl.celery import app
 from crawl.db_iface import *
 from crawl.webstore_iface import *
-from common.enc_temp_dir import EncryptedTempDirectory
 
 CHROME_VERSION = calc_chrome_version(_conf.version, _conf.release_date)
 DOWNLOAD_URL = _conf.url.format(CHROME_VERSION, '{}')

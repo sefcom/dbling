@@ -1,6 +1,6 @@
 aiodns
 celery==3.1.24
-crx_unpack>=0.0.5.4
+crx_unpack>=0.1
 eventlet
 kombu==3.0.37
 lxml
