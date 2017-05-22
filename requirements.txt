@@ -1,7 +1,7 @@
 ansible
 -r common/requirements.txt
 -r crawl/requirements.txt
--r driver/requirements.txt
+-r profiler/requirements.txt
 -r merl/requirements.txt
 -r other/requirements.txt
 -r secret/requirements.txt
