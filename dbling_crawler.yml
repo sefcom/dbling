@@ -217,7 +217,7 @@
 
   - name: drop file with new login for MySQL
     template:
-      src: daemons/my.cnf
+      src: config/my.cnf
       dest: ~/.my.cnf
       mode: 0600
 
@@ -338,7 +338,7 @@
 
   - name: copy beat daemon script to /etc/init.d/
     copy:
-      src: daemons/celerybeat
+      src: config/celerybeat
       dest: /etc/init.d/celerybeat
       owner: root
       group: root
@@ -348,7 +348,7 @@
 
   - name: copy beat daemon config to /etc/default/
     copy:
-      src: daemons/celerybeat.conf
+      src: config/celerybeat.conf
       dest: /etc/default/celerybeat
       owner: root
       group: root
@@ -432,7 +432,7 @@
 
   - name: copy sshfs configuration
     copy:
-      src: daemons/crawler-sshfs.service
+      src: config/crawler-sshfs.service
       dest: /etc/systemd/system/crawler-sshfs.service
       owner: root
       group: root
@@ -453,7 +453,7 @@
 
   - name: copy worker daemon script to /etc/init.d/
     copy:
-      src: daemons/celeryd
+      src: config/celeryd
       dest: /etc/init.d/celeryd
       owner: root
       group: root
@@ -463,7 +463,7 @@
 
   - name: copy worker daemon config to /etc/default/
     copy:
-      src: daemons/celeryd.conf
+      src: config/celeryd.conf
       dest: /etc/default/celeryd
       owner: root
       group: root
