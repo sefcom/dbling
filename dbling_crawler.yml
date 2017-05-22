@@ -181,7 +181,10 @@
 
   tasks:
   - include_vars:
-      file: 'secret/passes.yml'
+      file: {{ item }}
+    with_items:
+      - 'secret/passes.yml'
+      - 'config/disk_uuids.yml'
 
   #
   #  Cinder Volume Setup
@@ -196,7 +199,7 @@
       dump: 0
       passno: 2
     with_items:
-      - { src: 'UUID=bee6c48f-f2e9-46ab-96a5-4669410f783c', path: '/var/lib/mysql' }
+      - { src: 'UUID={{ mysql_disk_uuid }}', path: '/var/lib/mysql' }
     become: yes
 
   #
@@ -388,6 +391,9 @@
   remote_user: ubuntu
 
   tasks:
+  - include_vars:
+      file: 'config/disk_uuids.yml'
+
   #
   #  Cinder Volume Setup
   #
@@ -401,7 +407,7 @@
       dump: 0
       passno: 2
     with_items:
-      - { src: 'UUID=9208c14a-6ce3-47f8-be9a-53731efdcfe3', path: '/var/lib/dbling' }
+      - { src: 'UUID={{ crx_disk_uuid }}', path: '/var/lib/dbling' }
     become: yes
 
 
