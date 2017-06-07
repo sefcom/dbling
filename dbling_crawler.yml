@@ -257,6 +257,12 @@
     become: yes
     register: mysql_conf_changed
 
+  - name: Allow 800 simultaneous client connections to MySQL
+    mysql_variables:
+      # See https://dev.mysql.com/doc/refman/5.7/en/too-many-connections.html for more info on this setting
+      variable: max_connections
+      value: 800
+
   - name: restart mysql if the configuration made any changes
     service:
       name: mysql

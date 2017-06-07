@@ -27,7 +27,7 @@ except AttributeError:
 if _nodename not in db_conf['nodenames']:
     db_conf['_url'] = path.join(db_conf['full_url'], db_conf['name'])
     create_str = '{type}://{user}:{pass}@{_url}'.format(**db_conf)
-    DB_ENGINE = create_engine(create_str, convert_unicode=True, pool_recycle=3600, pool_size=10)
+    DB_ENGINE = create_engine(create_str, convert_unicode=True, pool_recycle=3600, pool_size=200)
 
 elif 'sqlalchemy.url' not in db_conf:
     # User name and password may be optional in this situation
