@@ -9,5 +9,6 @@ secret/
 .vagrant/
 *.bak
 *.retry
-log/
-docs/
+*.log
+*.gddraw
+*.gdsheet

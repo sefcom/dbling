@@ -1,29 +1,33 @@
 [crawl-msg-server]
 dbling-master  ansible_host=dbling
 
-[crawl-db-server]
-dbling-master  ansible_host=dbling
+[db-server]
+dbling-crx     ansible_host=dbling-crx
 
-[crawl-crx-server]
-dbling-master  ansible_host=dbling
+[crx-server]
+dbling-crx     ansible_host=dbling-crx
 
 [crawl-workers]
-dbling-wk      ansible_host=dbling1
+dbling-wk1     ansible_host=dbling1
 dbling-wk2     ansible_host=dbling2
 dbling-wk3     ansible_host=dbling3
+dbling-wk4     ansible_host=dbling4
 
 [crawlers:children]
 crawl-msg-server
-crawl-db-server
-crawl-crx-server
 crawl-workers
 
-[crawlers:vars]
-msg_ip=10.90.90.227
+[minimal:children]
+crawlers
+crx-server
+db-server
+
+[minimal:vars]
+msg_ip=10.90.3.3
 msg_host=dbling-msg
-db_ip=10.90.90.227
+db_ip=10.90.3.2
 db_host=dbling-db
-crx_ip=10.90.90.227
+crx_ip=10.90.3.2
 crx_host=dbling-crx
 ansible_connection=ssh
 ansible_user=ubuntu

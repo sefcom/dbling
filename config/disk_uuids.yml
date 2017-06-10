@@ -1,4 +1,5 @@
 ---
 
-crx_disk_uuid: '9208c14a-6ce3-47f8-be9a-53731efdcfe3'
+crx_disk_uuid: '05f65cd2-17b1-4ed8-a732-ef71235de7b1'
 mysql_disk_uuid: 'bee6c48f-f2e9-46ab-96a5-4669410f783c'
+mysql_mount_point: '/var/lib/mysql'
