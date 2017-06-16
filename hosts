@@ -13,17 +13,21 @@ dbling-wk2     ansible_host=dbling2
 dbling-wk3     ansible_host=dbling3
 dbling-wk4     ansible_host=dbling4
 
+[crawl-summarize]
+dbling-sum     ansible_host=dbling-sum
+
 [crawlers:children]
-crawl-msg-server
 crawl-workers
+crawl-summarize
 
 [minimal:children]
 crawlers
+crawl-msg-server
 crx-server
 db-server
 
 [minimal:vars]
-msg_ip=10.90.3.3
+msg_ip=10.90.3.21
 msg_host=dbling-msg
 db_ip=10.90.3.2
 db_host=dbling-db
@@ -32,3 +36,4 @@ crx_host=dbling-crx
 ansible_connection=ssh
 ansible_user=ubuntu
 ansible_python_interpreter=/usr/bin/python3
+code_dir=/home/ubuntu/dbling

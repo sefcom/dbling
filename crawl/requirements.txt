@@ -7,3 +7,4 @@ lxml
 requests>=2.11
 sqlalchemy
 uvloop
+pymemcache

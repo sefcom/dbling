@@ -22,8 +22,9 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_CHORD_PROPAGATES = False  # If a task fails, send the exception value to the callback, don't just give up
-CELERY_TASK_RESULT_EXPIRES = timedelta(days=4)
-# CELERY_TASK_RESULT_EXPIRES = 60*10  # Expire results after 10 minutes # TODO: Remove this after initial testing
+# Results should always be permanent
+CELERY_TASK_RESULT_EXPIRES = None
+CELERY_RESULT_PERSISTENT = True
 
 # Acknowledge tasks only once they've completed. If the worker crashes, the job will be requeued.
 CELERY_ACKS_LATE = True
@@ -38,6 +39,11 @@ log_setup(log_format=CELERYD_LOG_FORMAT)
 CELERY_SEND_TASK_ERROR_EMAILS = False  # This is the default. Tasks should explicitly set the send_error_emails flag.
 ADMINS = copy(admin_emails)
 SERVER_EMAIL = sender_email_addr
+
+# Routing
+CELERY_ROUTES = {
+    'crawl.tasks.summarize': {'queue': 'summarize'},
+}
 
 
 # A "beat" service can be started with `celery -A proj beat` that uses the time information to periodically start

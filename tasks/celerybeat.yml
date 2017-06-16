@@ -1,0 +1,52 @@
+---
+
+#
+#  Celery beat service setup and configuration
+#
+- name: check if celerybeat service already exists
+  shell: service --status-all | grep celerybeat || echo ""
+  register: celerybeat_check
+
+- name: copy beat daemon script to /etc/init.d/
+  copy:
+    src: config/celerybeat
+    dest: /etc/init.d/celerybeat
+    owner: root
+    group: root
+    mode: 0755
+  become: yes
+  register: sync_celerybeat_d
+
+- name: copy beat daemon config to /etc/default/
+  copy:
+    src: config/celerybeat.conf
+    dest: /etc/default/celerybeat
+    owner: root
+    group: root
+    mode: 0644
+  become: yes
+  register: sync_celerybeat_conf
+
+- name: reload systemctl units
+  command: systemctl daemon-reload
+  become: yes
+  when: ansible_distribution == 'Ubuntu' and ansible_distribution_version == '16.04' and
+    (sync_celerybeat_d.changed or sync_celerybeat_conf.changed or sync_sources.changed)
+  register: service_systemctl_restarted
+
+- name: restart celerybeat if the configuration changed (service already exists)
+  service:
+    name: celerybeat
+    enabled: yes
+    state: restarted
+  become: yes
+  when: service_systemctl_restarted.changed and celerybeat_check.stdout.find('celery') != -1
+  register: service_celerybeat_restarted
+
+- name: ensure the celerybeat service starts
+  service:
+    name: celerybeat
+    enabled: yes
+    state: started
+  become: yes
+  when: not service_celerybeat_restarted.changed

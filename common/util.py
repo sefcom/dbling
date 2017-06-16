@@ -3,6 +3,7 @@
 
 import stat
 from datetime import datetime, date, timedelta
+from itertools import islice, chain
 from os import path
 from subprocess import check_output
 
@@ -232,3 +233,37 @@ def ttl_files_in_dir(dir_path, pat='.'):
     ttl = int(check_output('ls -A -U --color=never {} | grep {} | wc -l'.format(dir_path, pat), shell=True).strip())
 
     return ttl
+
+
+def chunkify(iterable, chunk_size):
+    """Split an iterable into smaller iterables of a certain size (chunk size).
+
+    For example, say you have a list that, for whatever reason, you don't want
+    to process all at once. You can use :function:`chunkify` to easily split up
+    the list to whatever size of chunk you want. Here's an example of what this
+    might look like:
+
+    ::
+
+        >>> my_list = range(1, 6)
+        >>> for sublist in chunkify(my_list, 2):
+        ...     for i in sublist:
+        ...         print(i, end=', ')
+        ...     print()
+
+    The output of the above code would be:
+
+    ::
+
+        1, 2,
+        3, 4,
+        5,
+
+    :param iterable: The iterable to be split into chunks.
+    :param int chunk_size: Size of each chunk. See above for an example.
+    """
+    # http://code.activestate.com/recipes/303279-getting-items-in-batches/
+    _it = iter(iterable)
+    while True:
+        batch = islice(_it, chunk_size)
+        yield chain([batch.__next__()], batch)

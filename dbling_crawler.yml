@@ -6,18 +6,37 @@
   remote_user: ubuntu
 
   tasks:
-  - name: Install basic packages
-    apt: name={{ item }} state=latest cache_valid_time=600
-    with_items:
-      - vim  # Just in case...
-      # Packages for NTP
-      - ntp
-      - ntpdate
-      # Packages that make my life easier when monitoring everything
-      - htop
-      - aptitude
-    become: yes
-    register: pkgs_install
+  - block:
+      - name: Install basic packages
+        apt: name={{ item }} state=latest cache_valid_time=600
+        with_items:
+          - vim  # Just in case...
+          # Packages for NTP
+          - ntp
+          - ntpdate
+          # Packages that make my life easier when monitoring everything
+          - htop
+          - aptitude
+        become: yes
+        register: pkgs_install
+    rescue:
+      # Only happens on a brand new machine that has never updated apt
+      - name: update apt's cache
+        apt:
+          update_cache: yes
+        become: yes
+      - name: Install basic packages
+        apt: name={{ item }} state=latest cache_valid_time=600
+        with_items:
+          - vim  # Just in case...
+          # Packages for NTP
+          - ntp
+          - ntpdate
+          # Packages that make my life easier when monitoring everything
+          - htop
+          - aptitude
+        become: yes
+        register: pkgs_install
 
   - name: Restart NTP
     service:
@@ -61,14 +80,54 @@
       - { ip: '{{crx_ip}}', host: '{{crx_host}}' }
     become: yes
 
+  #
+  #  Access control stuff
+  #
+  - name: Create group "celery", needed by celery init scripts
+    group:
+      name: celery
+      state: present
+    become: yes
+
+  - name: Create user "celery", needed by celery init scripts
+    user:
+      name: celery
+      group: celery
+      state: present
+      createhome: no
+    become: yes
+
+  - name: Add user "ubuntu" to the celery group
+    user:
+      name: ubuntu
+      groups: celery  # Note that it's "groups" not "group"
+      append: yes
+      state: present
+    become: yes
+
+  - name: Sync the secrets
+    synchronize:
+      src: secret
+      dest: "{{ code_dir }}"
+
+  - name: move ssh keys to ~/.ssh then copy pub key to authorized_keys and set proper permissions
+    shell: mv dblings-key dblings-key.pub ~/.ssh/ && cat ~/.ssh/dblings-key.pub >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/dblings-key ~/.ssh/authorized_keys
+    args:
+      chdir: "{{ code_dir }}/secret"
+      creates: ~/.ssh/dblings-key
+
+  - name: Empty the known_hosts file
+    copy:
+      dest: /home/ubuntu/.ssh/known_hosts
+      content: ""
+      mode: 0600
+
 
 
 #
 #  Actions common to all dbling crawler nodes
 #
 - hosts: crawlers
-  vars:
-    code_dir: /home/ubuntu/dbling
   remote_user: ubuntu
 
   tasks:
@@ -132,6 +191,8 @@
       - libssl-dev
       - libffi-dev
       - python-dev
+      # Locking (really only used by summarize, but best to have it on all crawlers)
+      - memcached
     become: yes
 
   - name: Install additional required packages (missing from Ubuntu 14.04)
@@ -161,23 +222,6 @@
         become: yes
 
   #
-  #  Access control stuff 1
-  #
-  - name: Create group "celery", needed by celery init scripts
-    group:
-      name: celery
-      state: present
-    become: yes
-
-  - name: Create user "celery", needed by celery init scripts
-    user:
-      name: celery
-      group: celery
-      state: present
-      createhome: no
-    become: yes
-
-  #
   #  Sync the code, install the libraries it uses
   #
   - name: ensure directory for the code exists
@@ -204,7 +248,6 @@
       - common
       - crawl
       - merl
-      - secret
     register: sync_sources
 
   - name: ensure dir for dbling's logs exists
@@ -245,21 +288,6 @@
       - merl
       - secret
     become: yes
-
-  #
-  #  Access control stuff 2
-  #
-  - name: move ssh keys to ~/.ssh then copy pub key to authorized_keys and set proper permissions
-    shell: mv dblings-key dblings-key.pub ~/.ssh/ && cat ~/.ssh/dblings-key.pub >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/dblings-key ~/.ssh/authorized_keys
-    args:
-      chdir: "{{ code_dir }}/secret"
-      creates: ~/.ssh/dblings-key
-
-  - name: Empty the known_hosts file
-    copy:
-      dest: /home/ubuntu/.ssh/known_hosts
-      content: ""
-      mode: 0600
 
 
 
@@ -391,12 +419,29 @@
     become: yes
     register: mysql_conf_changed
 
+  - name: Check how many simultaneous client connections MySQL allows
+    mysql_variables:
+      variable: max_connections
+    register: max_conn_value
+
+  - debug:
+      var: max_conn_value
+
   - name: Allow 800 simultaneous client connections to MySQL
     mysql_variables:
       # See https://dev.mysql.com/doc/refman/5.7/en/too-many-connections.html for more info on this setting
       variable: max_connections
       value: 800
+    when: max_conn_value.msg != "800"
     register: multiple_connections
+
+  - name: Check how many simultaneous client connections MySQL allows
+    mysql_variables:
+      variable: max_connections
+    register: max_conn_value
+
+  - debug:
+      var: max_conn_value
 
   - name: restart mysql if the configuration made any changes
     service:
@@ -461,17 +506,6 @@
   #
   #  RabbitMQ Setup and Configuration
   #
-  - name: Ensure amqp library installs (14.04 only)
-    pip:
-      executable: pip3.5
-      name: '{{ item }}'
-    with_items:
-      - amqp
-      - anyjson
-      - billiard
-    become: yes
-    when: ansible_distribution == 'Ubuntu' and ansible_distribution_version == '14.04'
-
   - name: Add the apt key for RabbitMQ
     # This and the next task are necessary because the version of RabbitMQ available in Ubuntu 16.04 is incompatible with systemd
     apt_key:
@@ -537,57 +571,6 @@
     become: yes
     when: plugin_enabled.changed or security_limits_conf.changed or rabbitmq_default_fileno.changed or pam_limits.changed
 
-  #
-  #  Celery beat service setup and configuration
-  #
-  - name: check if celerybeat service already exists
-    shell: service --status-all | grep celerybeat || echo ""
-    register: celerybeat_check
-
-  - name: copy beat daemon script to /etc/init.d/
-    copy:
-      src: config/celerybeat
-      dest: /etc/init.d/celerybeat
-      owner: root
-      group: root
-      mode: 0755
-    become: yes
-    register: sync_celerybeat_d
-
-  - name: copy beat daemon config to /etc/default/
-    copy:
-      src: config/celerybeat.conf
-      dest: /etc/default/celerybeat
-      owner: root
-      group: root
-      mode: 0644
-    become: yes
-    register: sync_celerybeat_conf
-
-  - name: reload systemctl units
-    command: systemctl daemon-reload
-    become: yes
-    when: ansible_distribution == 'Ubuntu' and ansible_distribution_version == '16.04' and
-      (sync_celerybeat_d.changed or sync_celerybeat_conf.changed or sync_sources.changed)
-    register: service_systemctl_restarted
-
-  - name: restart celerybeat if the configuration changed (service already exists)
-    service:
-      name: celerybeat
-      enabled: yes
-      state: restarted
-    become: yes
-    when: service_systemctl_restarted.changed and celerybeat_check.stdout.find('celery') != -1
-    register: service_celerybeat_restarted
-
-  - name: ensure the celerybeat service starts
-    service:
-      name: celerybeat
-      enabled: yes
-      state: started
-    become: yes
-    when: not service_celerybeat_restarted.changed
-
 
 
 #
@@ -619,12 +602,30 @@
 
 
 #
+#  Actions for the crawler summarizers
+#
+- hosts: crawl-summarize
+  remote_user: ubuntu
+
+  tasks:
+  - name: Set up celery daemon service
+    include: tasks/celeryd.yml
+    vars:
+      queue: " -Q summarize"
+
+
+
+#
 #  Actions for the crawler workers
 #
 - hosts: crawl-workers
   remote_user: ubuntu
 
   tasks:
+  - name: Set up celerybeat service on first worker
+    include: tasks/celerybeat.yml
+    when: ansible_host.endswith('-1')
+
   - name: ensure sshfs, upstart, fuse, and ecryptfs-utils are at latest version
     apt: name={{ item }} state=latest cache_valid_time=600
     with_items:
@@ -659,46 +660,10 @@
       state: started
     become: yes
 
-  - name: check if celeryd service already exists
-    shell: service --status-all | grep celeryd || echo ""
-    register: celeryd_check
-
-  - name: copy worker daemon script to /etc/init.d/
-    copy:
-      src: config/celeryd
-      dest: /etc/init.d/celeryd
-      owner: root
-      group: root
-      mode: 0755
-    become: yes
-    register: sync_celery_d
-
-  - name: copy worker daemon config to /etc/default/
-    copy:
-      src: config/celeryd.conf
-      dest: /etc/default/celeryd
-      owner: root
-      group: root
-      mode: 0644
-    become: yes
-    register: sync_celery_conf
-
-  - name: restart celeryd if configurations or files changed (service already exists)
-    service:
-      name: celeryd
-      state: restarted
-    become: yes
-    when: (sync_celery_d.changed or sync_celery_conf.changed or sync_sources.changed)
-          and celeryd_check.stdout.find('celery') != -1
-    register: service_celeryd
-
-  - name: ensure celeryd service is started
-    service:
-      name: celeryd
-      enabled: yes
-      state: started
-    become: yes
-    when: not service_celeryd.changed
+  - name: Set up celery daemon service
+    include: tasks/celeryd.yml
+    vars:
+      queue: ""
 
   - name: ensure home directory for celery exists (needed for eCryptfs)
     file:

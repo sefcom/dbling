@@ -1,0 +1,45 @@
+---
+
+#
+#  Celery daemon service setup and configuration
+#
+- name: check if celeryd service already exists
+  shell: service --status-all | grep celeryd || echo ""
+  register: celeryd_check
+
+- name: copy worker daemon script to /etc/init.d/
+  copy:
+    src: config/celeryd
+    dest: /etc/init.d/celeryd
+    owner: root
+    group: root
+    mode: 0755
+  become: yes
+  register: sync_celery_d
+
+- name: copy worker daemon config to /etc/default/
+  template:
+    src: config/celeryd.conf
+    dest: /etc/default/celeryd
+    owner: root
+    group: root
+    mode: 0644
+  become: yes
+  register: sync_celery_conf
+
+- name: restart celeryd if configurations or files changed (service already exists)
+  service:
+    name: celeryd
+    state: restarted
+  become: yes
+  when: (sync_celery_d.changed or sync_celery_conf.changed or sync_sources.changed)
+        and celeryd_check.stdout.find('celery') != -1
+  register: service_celeryd
+
+- name: ensure celeryd service is started
+  service:
+    name: celeryd
+    enabled: yes
+    state: started
+  become: yes
+  when: not service_celeryd.changed

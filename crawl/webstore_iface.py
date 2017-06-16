@@ -28,6 +28,8 @@ DONT_OVERWRITE_DOWNLOADED_CRX = False
 CHUNK_SIZE = 512
 NUM_HTTP_RETIRES = 5
 
+TESTING = False  # 1000  # Set to an int when not False
+
 
 logging.getLogger('requests').setLevel(logging.WARNING)
 
@@ -150,6 +152,8 @@ class DownloadCRXList:
         # Convert IDs to a list, then sort it
         self._id_list = list(ids)
         self._id_list.sort()
+        if TESTING:  # Truncate the list
+            self._id_list = self._id_list[:TESTING]
 
         logging.warning('There were {} duplicate IDs from the {} lists.'.format(duplicate_count - len(self), num_lists))
 

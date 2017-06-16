@@ -1,12 +1,13 @@
 # *-* coding: utf-8 *-*
 
 import logging
-from datetime import timedelta
+from datetime import timedelta, datetime
 from json import dumps, load
 from json.decoder import JSONDecodeError
-from os import path, listdir
+from math import ceil
+from os import path, listdir, remove
 from tempfile import TemporaryDirectory
-from time import perf_counter
+from time import perf_counter, sleep
 
 from celery import chord
 from crx_unpack import *
@@ -17,17 +18,22 @@ from common.centroid import calc_centroid
 from common.const import EXT_NAME_LEN_MAX
 from common.crx_conf import conf as _conf
 from common.graph import make_graph_from_dir
+from common.sync import acquire_lock
 from common.util import calc_chrome_version, dt_dict_now, MalformedExtId, get_crx_version, cent_vals_to_dict, \
-    MunchyMunch, PROGRESS_PERIOD, ttl_files_in_dir, get_id_version
+    MunchyMunch, PROGRESS_PERIOD, ttl_files_in_dir, get_id_version, chunkify
 from crawl.celery import app
 from crawl.db_iface import *
 from crawl.webstore_iface import *
 
 CHROME_VERSION = calc_chrome_version(_conf.version, _conf.release_date)
 DOWNLOAD_URL = _conf.url.format(CHROME_VERSION, '{}')
+RETRY_DELAY = 5  # Delay for 5 seconds before retrying tasks
+JOB_ID_FMT = '%Y-%m-%d_%H-%M-%S'
 
 TESTING = READ_ONLY
 
+CHUNK_SIZE = 10 * 1000
+TEST_LIMIT = float('inf')  # 5000  # Set to float('inf') when not testing
 
 ##################
 #
@@ -81,7 +87,7 @@ def start_list_download():
         # we lose track of our progress.
         list_count += 1
         add_new_crx_to_db({'id': crx, 'dt_avail': dt_avail}, TESTING and not num % PROGRESS_PERIOD)
-    ttl_time = str(timedelta(seconds=(perf_counter()-t1)))
+    ttl_time = str(timedelta(seconds=(perf_counter() - t1)))
 
     if list_count != len(crx_list):
         msg = 'Counts of CRXs don\'t match. Downloader reported {} but processed {}.'.format(len(crx_list), list_count)
@@ -92,14 +98,24 @@ def start_list_download():
     # Notify the admins that the download is complete and the list of CRX IDs has been updated
     email_list_update_summary.delay(len(crx_list), ttl_time)
 
-    # Force the iterator back to the beginning (not generally good practice, but whatever)
-    # This reuses the list downloaded earlier and changes the return value
-    # crx_list.reset_stale(ret_tup=True)
-
-    # Send all CRXs to be queued, then summarize results
+    # Split the IDs into sub-lists of CHUNK_SIZE. Each chunk of IDs should be processed using a chord that has as the
+    # callback the summarize() function, which keeps track of how many chunks to expect, which ones have completed,
+    # and a summary of their statistics. When all chunks have completed, summarize() will send an email with the final
+    # stats tally.
     logging.info('Starting extension download/extract/profile process. There are {} total IDs.'.format(len(crx_list)))
-    chord((process_crx.s({'id': crx, 'dt_avail': dt_avail, 'msgs': [], 'job_num': num, 'job_ttl': len(crx_list)})
-           for crx, num in crx_list), summarize_job.s())()
+
+    job_id = datetime.now().strftime(JOB_ID_FMT)
+    ttl_files = len(crx_list)
+    # The code below needs to handle floats because TEST_LIMIT might be infinity
+    ttl_chunks = ceil(min(float(ttl_files), TEST_LIMIT) / CHUNK_SIZE)
+
+    for chunk_num, sub_list in enumerate(chunkify(crx_list, CHUNK_SIZE)):
+        chord((process_crx.s(make_crx_obj(crx, dt_avail, num, ttl_files)) for crx, num in sub_list))(
+            summarize.s(job_id=job_id, chunk_num=chunk_num, ttl_chunks=ttl_chunks))
+
+
+def make_crx_obj(id_, dt_avail, job_num, job_ttl):
+    return {'id': id_, 'dt_avail': dt_avail, 'msgs': [], 'job_num': job_num, 'job_ttl': job_ttl}
 
 
 @app.task(send_error_emails=True, base=SqlAlchemyTask)
@@ -127,7 +143,15 @@ def start_redo_extract_profile():
     """
     # Using the `crxs_on_disk` generator, send all the CRXs to be queued, then summarize the results
     logging.info('Beginning re-profiling process of all CRXs already downloaded.')
-    chord((redo_extract_profile.s(crx_obj) for crx_obj in crxs_on_disk()), summarize_job.s())()
+
+    job_id = datetime.now().strftime(JOB_ID_FMT)
+    ttl_files = ttl_files_in_dir(_conf.save_path, pat='crx')
+    # The code below needs to handle floats because TEST_LIMIT might be infinity
+    ttl_chunks = ceil(min(float(ttl_files), TEST_LIMIT) / CHUNK_SIZE)
+
+    for chunk_num, sub_list in enumerate(chunkify(crxs_on_disk(limit=TEST_LIMIT), CHUNK_SIZE)):
+        chord((redo_extract_profile.s(crx_obj) for crx_obj in sub_list))(
+            summarize.s(job_id=job_id, chunk_num=chunk_num, ttl_chunks=ttl_chunks))
 
 
 #####################
@@ -221,7 +245,7 @@ def redo_extract_profile(crx_obj):
     # This flag tells us if any error occur that are bad enough we should stop processing the CRX
     crx_obj.stop_processing = False
 
-    with TemporaryDirectory(dir=_conf.extract_dir) as extracted_path,\
+    with TemporaryDirectory(dir=_conf.extract_dir) as extracted_path, \
             EncryptedTempDirectory(dir=_conf.extract_dir, upper_dir=extracted_path) as enc_extracted_path:
         # These temporary directories will only exist within this "with" clause
         crx_obj.extracted_path = extracted_path
@@ -334,6 +358,9 @@ def download_crx(crx_obj):
         crx_obj.msgs.append("-Couldn't extract version number")
         crx_obj.stop_processing = True
 
+    except DbActionFailed:
+        crx_obj.msgs.append('-DB action failed while saving download information')
+
     except:
         logging.critical('{} [{}/{}]  An unknown error occurred while downloading'.
                          format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl), exc_info=1)
@@ -415,7 +442,10 @@ def extract_crx(crx_obj, **kwargs):
         logging.debug('{} [{}/{}]  Unpack complete'.format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
         crx_obj.dt_extracted = dt_dict_now()
         crx_obj = read_manifest(crx_obj)
-        db_extract_complete(crx_obj)
+        try:
+            db_extract_complete(crx_obj)
+        except DbActionFailed:
+            crx_obj.msgs.append('-DB action failed while saving extraction information')
 
     return crx_obj
 
@@ -533,39 +563,91 @@ def email_list_update_summary(id_count, ttl_time):
     logging.warning('{}\n{}'.format(subject, body))
 
 
-@app.task
-@MunchyMunch
-def summarize_job(sub_jobs):
+@app.task(bind=True)
+def summarize(self, jobs, *, job_id, chunk_num, ttl_chunks):
     """Gather all the sub-job stats, email to admins.
 
     Also logs the information at the WARNING level.
 
-    :param sub_jobs: List of messages. Should be from `crx_obj.msgs`.
-    :type sub_jobs: list
+    :param self: Because this is a "bound" function, it will have access to
+        additional methods via the `self` parameter. Not sure what type it is.
+    :param list jobs: List of messages. Should be from `crx_obj.msgs`.
+    :param str job_id: ID for the set of job chunks. Should be the timestamp
+        with the format given in `JOB_ID_FMT`.
+    :param int chunk_num: Which chunk this set of results corresponds to. Must
+        be in the range 0 to `ttl_chunks`-1.
+    :param int ttl_chunks: Total number of chunks in this job. It is critical
+        to how this function works that this number be accurate.
     :rtype: None
     """
-    stats = {}
-    for job in sub_jobs:
-        for stat_type in job:
-            if stat_type not in stats:
-                stats[stat_type] = 1
-            else:
-                stats[stat_type] += 1
+    with acquire_lock(job_id, wait=RETRY_DELAY):
+        # Compute the file name where the job details are (will be) stored
+        detail_filename = 'job_detail-{}.json'.format(job_id)
 
-    subject = 'dbling: Profiling and centroid calculations complete'
-    body = dumps(stats, indent=2, sort_keys=True)
-    try:
-        app.mail_admins(subject, body)
-    except ConnectionRefusedError:
-        # Raised when running on a machine that doesn't accept SMTP connections
-        pass
-    logging.warning('{}\n{}'.format(subject, body))
+        # First chunk encountered of the set, need to initialize
+        if not path.exists(detail_filename):
+            action = 'Initialized'
+            # Create list of all chunks
+            all_jobs = list(range(ttl_chunks))
+            stats = {}
+
+        # File exists, load previous data
+        else:
+            action = 'Appended'
+            with open(detail_filename) as f:
+                job_data = load(f)
+            all_jobs = job_data['all_jobs']
+            stats = job_data['stats']
+
+        # Remove the current chunk number from the list of all jobs
+        try:
+            all_jobs.remove(chunk_num)
+        except ValueError:
+            logging.critical('Unable to find chunk {} in list of all chunks for job {}'.format(chunk_num, job_id))
+
+        # Merge the current chunk of job data with the previous
+        ttl_stats_merged = 0
+        for job in jobs:
+            for stat_type in job:
+                try:
+                    stats[stat_type] += 1
+                except KeyError:
+                    # Key didn't already exist for this statistic, so create it
+                    stats[stat_type] = 1
+            ttl_stats_merged += 1
+        logging.info('Job: {}  {} stats from {} jobs. Chunk: {} / {}'
+                     .format(job_id, action, ttl_stats_merged, chunk_num + 1, ttl_chunks))
+
+        # If the job is done, delete the job file, email admins, log results
+        if not len(all_jobs):
+            logging.info('Job complete. Deleting job detail file {}'.format(detail_filename))
+            remove(detail_filename)
+
+            subject = 'dbling: Profiling and centroid calculations complete'
+            body = dumps(stats, indent=2, sort_keys=True)
+            try:
+                app.mail_admins(subject, body)
+            except ConnectionRefusedError:
+                # Raised when running on a machine that doesn't accept SMTP connections
+                pass
+
+            logging.warning('{}\n{}'.format(subject, body))
+
+        # Otherwise, save the current job information
+        else:
+            logging.debug('Saving data for job {}'.format(job_id))
+            with open(detail_filename, 'w') as f:
+                f.write(dumps({'all_jobs': all_jobs, 'stats': stats}))
 
 
-def crxs_on_disk(crx_dir=_conf.save_path):
+def crxs_on_disk(crx_dir=_conf.save_path, limit=float('inf')):
     """Generate crx_obj dicts for CRXs already downloaded to `crx_dir`.
 
     :param str crx_dir: Directory where the CRXs are saved when downloaded.
+    :param limit: When testing, this can be set to a number, and only that
+        many CRXs will be returned. If the value of limit is a `float` instead
+        of an `int` it should be infinity (e.g. `float('inf')`).
+    :type limit: int or float
     :return: Dict with the following keys:
 
         - `id`
@@ -579,6 +661,8 @@ def crxs_on_disk(crx_dir=_conf.save_path):
     """
     ttl = ttl_files_in_dir(crx_dir, pat='crx')
     logging.info('Total number of CRXs on disk: {}'.format(ttl))
+    if limit != float('inf'):
+        logging.info('... but ony {} will be processed while testing.'.format(limit))
     num = 0
 
     for filename in listdir(crx_dir):
@@ -587,6 +671,8 @@ def crxs_on_disk(crx_dir=_conf.save_path):
 
         num += 1
         crx, version = get_id_version(filename)
+        if num > limit:
+            raise StopIteration
 
         yield {
             'id': crx,

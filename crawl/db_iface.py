@@ -5,7 +5,7 @@ from time import sleep
 
 from celery import Task
 from sqlalchemy import select, and_
-from sqlalchemy.exc import IntegrityError, InvalidRequestError, DatabaseError
+from sqlalchemy.exc import IntegrityError, InvalidRequestError, DBAPIError
 from sqlalchemy.orm import scoped_session, sessionmaker
 
 from common.chrome_db import DB_ENGINE, extension, id_list
@@ -13,7 +13,7 @@ from common.util import MunchyMunch, dict_to_dt
 from crawl.celery import app
 
 __all__ = ['add_new_crx_to_db', 'db_download_complete', 'db_extract_complete', 'db_profile_complete',
-           'DuplicateDownload', 'SqlAlchemyTask', 'READ_ONLY']
+           'DuplicateDownload', 'SqlAlchemyTask', 'READ_ONLY', 'DbActionFailed']
 
 DB_SESSION = scoped_session(sessionmaker(autocommit=False, autoflush=False, bind=DB_ENGINE))
 MAX_EXECUTE_RETRIES = 20
@@ -22,6 +22,10 @@ READ_ONLY = False
 
 class DuplicateDownload(Exception):
     """Raised when the DB already has a version of the extension."""
+
+
+class DbActionFailed(Exception):
+    """Raised when the max retries is reached on executing a query."""
 
 
 class SqlAlchemyTask(Task):
@@ -82,6 +86,8 @@ def db_download_complete(crx_obj, log_progress=False):
         (True) level.
     :type log_progress: bool
     :rtype: None
+    :raises: :exception:`DbActionFailed` When updating the DB with download
+        information fails.
     """
     db_session = DB_SESSION()
     log = logging.info if bool(log_progress) else logging.debug
@@ -129,6 +135,8 @@ def db_extract_complete(crx_obj, log_progress=False):
         (True) level.
     :type log_progress: bool
     :rtype: None
+    :raises: :exception:`DbActionFailed` When updating the DB with extraction
+        information fails.
     """
     db_session = DB_SESSION()
     log = logging.info if bool(log_progress) else logging.debug
@@ -186,13 +194,19 @@ def db_profile_complete(crx_obj, log_progress=False, update_dt_avail=True):
     u = extension.update().where(and_(extension.c.ext_id == crx_obj.id,
                                       extension.c.version == crx_obj.version)
                                  ).values(crx_obj.cent_dict)
-    _execute_and_commit(db_session, u)
-
-    # Create a stats message indicating what happened
-    if update_dt_avail:
-        crx_obj.msgs.append('+Successfully updated profile info for an extension entry in the DB')
+    try:
+        _execute_and_commit(db_session, u)
+    except DbActionFailed:
+        if update_dt_avail:
+            crx_obj.msgs.append('-DB action failed while updating profile info for a new extension')
+        else:
+            crx_obj.msgs.append('-DB action failed while re-profiling an extension')
     else:
-        crx_obj.msgs.append('*Re-profiled an extension and updated its entry in the DB')
+        # Create a stats message indicating what happened
+        if update_dt_avail:
+            crx_obj.msgs.append('+Successfully updated profile info for an extension entry in the DB')
+        else:
+            crx_obj.msgs.append('*Re-profiled an extension and updated its entry in the DB')
 
     log('{} [{}/{}]  Database entry complete (profile)'.format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
 
@@ -204,10 +218,13 @@ def _execute_and_commit(db_session, query):
     while True:
         try:
             db_session.execute(query)
-        except DatabaseError:
+        except DBAPIError:
             i += 1
             if i > MAX_EXECUTE_RETRIES:
-                raise
+                msg = 'Maximum retries reached for DB command execution. Query:\n{}'.format(str(query))
+                logging.warning(msg + '\nAn email will be sent to the admins')
+                app.mail_admins('dbling: Problem encountered executing query', msg)
+                raise DbActionFailed
             sleep(2 * i)
         else:
             _commit_it(db_session)
