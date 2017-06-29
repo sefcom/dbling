@@ -1,53 +1,34 @@
 import os
 import httplib2
-import argparse
+import json
+import env
 from oauth2client import client
 from oauth2client.file import Storage
 from oauth2client import tools
 
-# do I even need the try except?
-try:
-    flags = argparse.ArgumentParser(parents=[tools.argparser]).parse_args()
-except ImportError:
-    flags = None
 
-
-# If modifying these scopes, delete your previously saved credentials
-# at .credentials/drive-python-quickstart.json
-# Permits us readonly access to all data of the Google Drive user
-SCOPES = 'https://www.googleapis.com/auth/drive.readonly'
-CLIENT_SECRET_FILE = 'client_secret.json'
-APPLICATION_NAME = 'Drive API Python Quickstart'
-
-
-def get_credentials():
-    # want this to be the dir where the .py file exists. I think cur with do it
+def get_credentials(scope, application_name, secret, credential_file):
     cur_dir = os.path.dirname(os.path.realpath('__FILE__'))
     credential_dir = os.path.join(cur_dir, '.credentials')
     if not os.path.exists(credential_dir):
         os.makedirs(credential_dir)
-    credential_path = os.path.join(credential_dir,
-                                   'drive-python-quickstart.json')
-
+    credential_path = os.path.join(credential_dir, str(credential_file))
     store = Storage(credential_path)
     credentials = store.get()
     if not credentials or credentials.invalid:
-        flow = client.flow_from_clientsecrets(CLIENT_SECRET_FILE, SCOPES)
-        flow.user_agent = APPLICATION_NAME
-        if flags:
-            credentials = tools.run_flow(flow, store, flags)
-        else:  # Needed only for compatibility with Python 2.6
-            credentials = tools.run(flow, store)
-        print('Storing credentials to ' + credential_path)
+        flow = client.flow_from_clientsecrets(secret, scope)
+        flow.user_agent = application_name
+        credentials = tools.run_flow(flow, store)
     return credentials
 
 
 def set_http():
-    credentials = get_credentials()
+    credentials = get_credentials(env.SCOPES, env.APPLICATION_NAME, env.CLIENT_SECRET_FILE, env.CREDENTIAL_FILE)
     http = credentials.authorize(httplib2.Http())
     return http
 
 
+# Was going to fix and make this better. Google APIs return json so just made a simple print_json method.
 def pretty_print(obj):
     if type(obj) == dict:
         for k, v in obj.items():
@@ -56,13 +37,15 @@ def pretty_print(obj):
                 pretty_print(v)
             else:
                 print('%s : %s' % (k, v))
-        print("==============================")
     elif type(obj) == list:
         for v in obj:
             if hasattr(v, '__iter__'):
                 pretty_print(v)
             else:
                 print(v)
-        # print("===============================")
     else:
         print(obj)
+
+
+def print_json(obj):
+    print(json.dumps(obj, sort_keys=True, indent=2))
