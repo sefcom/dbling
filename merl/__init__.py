@@ -3,6 +3,7 @@
 import atexit
 import logging
 import os
+import pwd
 from math import e
 from operator import itemgetter
 from sys import argv as sys_argv
@@ -21,8 +22,9 @@ STARTER = """<?xml version="1.0" encoding="UTF-8"?>
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:schemaLocation="
         https://mikemabey.com/schema/merl https://mikemabey.com/schema/merl.xsd
-        http://www.forensicswiki.org/wiki/Category:Digital_Forensics_XML https://raw.githubusercontent.com/dfxml-working-group/dfxml_schema/master/dfxml.xsd
+        http://www.forensicswiki.org/wiki/Category:Digital_Forensics_XML https://github.com/dfxml-working-group/dfxml_schema/raw/master/dfxml.xsd
     "
+    version="0.1"
 />"""
 MAX_FAMILY_MATCHES = 1000
 MAX_CANDIDATE_TAGS = 5
@@ -75,7 +77,7 @@ class Merl:
 
     def match_candidates(self, candidates_list):
         """Iterate through the list of candidates and find matches.
-        
+
         :param list candidates_list: List of graphs that are candidates for
             being extensions installed on the device.
         :rtype: None
@@ -87,11 +89,11 @@ class Merl:
 
     def match_candidate(self, candidate, match_num=None):
         """Find all matches for a single candidate.
-        
+
         Depending on how the program was invoked, this will either print the
         results in a plain format with no structure (but that is easier to
         read quickly) or in an XML format conforming to the MERL schema.
-        
+
         :param DblingGraph candidate: A graph that is a candidate for being an
             extension installed on the device.
         :param int match_num: Number indicating which number of candidate this
@@ -246,7 +248,7 @@ class Merl:
                               self.tag('dfxml:command_line', ' '.join(sys_argv)),
                               # self.tag('dfxml:uid', str(os.getuid())),
                               self.tag('dfxml:uid', os.getuid()),
-                              self.tag('dfxml:username', os.getlogin()),
+                              self.tag('dfxml:username', get_username()),
                               # self.tag('dfxml:start_time', ),  # TODO
                               ),
                      # self.tag('dfxml:library', ''),  # unbounded  # TODO
@@ -273,3 +275,14 @@ class Merl:
 
 def calc_confidence(distance, fam_size, delta=3):
     return (e ** (-1 * delta * distance)) / fam_size
+
+
+def get_username():
+    try:
+        return os.getlogin()
+    except FileNotFoundError:
+        pass
+    try:
+        return pwd.getpwuid(os.getuid()).pw_name
+    except:
+        return 'UNKNOWN'

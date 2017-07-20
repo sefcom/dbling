@@ -51,13 +51,20 @@ MODE_UNIX = {stat.S_IFREG: 1,
              stat.S_IFSOCK: 6,
              stat.S_IFLNK: 7}
 
-TYPE_TO_NAME = {1: 'r',
-                2: 'd',
-                3: 'c',  # TODO: 3-7 may not actually correspond to the DFXML standard
-                4: 'b',
-                5: 'f',
-                6: 's',
-                7: 'l'}
+# Maps Unix file type numbers to the character used in DFXML to represent that file type
+# See: https://github.com/dfxml-working-group/dfxml_schema/blob/4c8aab566ea44d64313a5e559b1ecdce5348cecf/dfxml.xsd#L412
+TYPE_TO_NAME = {0: '-',  # Unknown
+                1: 'r',  # Regular
+                2: 'd',  # Directory
+                3: 'c',  # Character device
+                4: 'b',  # Block device
+                5: 'p',  # Named pipe
+                6: 's',  # Socket
+                7: 'l'}  # Symbolic link
+# Other file types defined in DFXML schema
+# h - Shadow inode (Solaris)
+# w - Whiteout (OpenBSD)
+# v - Special (Used in The SleuthKit for added "Virtual" files, e.g. $FAT1)
 
 
 class ModeTypeDT(IntEnum):

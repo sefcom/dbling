@@ -14,10 +14,11 @@ Options:
 
 As a reminder, the command to mount an image is:
 
- sudo mount -o ro -t <fs_type> <img_file> </mount/point>
+ sudo mount -o ro,noload -t <fs_type> <img_file> </mount/point>
 """
 import logging
 import sys
+from datetime import datetime
 from os import geteuid, seteuid
 from os.path import abspath, dirname, join
 
@@ -29,7 +30,7 @@ try:
 except ImportError:
     sys.path.append(join(dirname(abspath(__file__)), '..'))
     from merl import Merl
-    from driver.graph_diff import FilesDiff, init_logging
+from profiler.graph_diff import FilesDiff, init_logging
 
 
 MAX_DIST = 2**31 - 1  # 2147483647  # Assumes the distance PropertyMap will be of type int32
@@ -37,6 +38,15 @@ MAX_DIST = 2**31 - 1  # 2147483647  # Assumes the distance PropertyMap will be o
 
 def go(start, mounted=False, verbose=False, show_graph=False, output_file=None, plain=False):
     init_logging(verbose=verbose)
+    file_needs_closing = False
+    if plain and output_file is None:
+        output_file = 'profile_{}.{}'.format(datetime.now().strftime('%Y-%m-%d_%H-%M-%S'),
+                                             'txt' if plain else 'merl')
+        print('No output file specified for {} format. Saving to {}'.
+              format('plain' if plain else 'MERL', output_file))
+        output_file = open(output_file)
+        file_needs_closing = True
+    merl = Merl(out_fp=output_file, plain_output=plain)
     graph = FilesDiff()
     if mounted:
         try:
@@ -60,7 +70,6 @@ def go(start, mounted=False, verbose=False, show_graph=False, output_file=None, 
     #     graph.show_graph(c)
 
     logging.info('Searching the DB for matches for each candidate graph. (%d)' % len(candidates))
-    merl = Merl(out_fp=output_file, plain_output=plain)
     merl.match_candidates(candidates)
 
     # Save XML to file, but only if the user didn't request output in a plain format
@@ -68,6 +77,9 @@ def go(start, mounted=False, verbose=False, show_graph=False, output_file=None, 
         merl.save_merl()
 
     merl.close_db()
+
+    if file_needs_closing:
+        output_file.close()
 
     logging.info('Search complete. Exiting.')
 
