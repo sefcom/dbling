@@ -1,9 +1,3 @@
-[submodule "deps/dfxml"]
-	path = deps/dfxml
-	url = https://github.com/simsong/dfxml.git
-[submodule "deps/pyuefi"]
-	path = deps/pyuefi
-	url = https://bitbucket.org/mmabey/pyuefi.git
-[submodule "deps/crx_unpack"]
-	path = deps/crx_unpack
-	url = https://bitbucket.org/mmabey/crx_unpack.git
+[submodule "merl/merl_schema"]
+	path = merl/merl_schema
+	url = https://github.com/mmabey/merl_schema.git

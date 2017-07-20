@@ -1,0 +1,674 @@
+---
+#
+#  Minimal setup for all managed dbling nodes
+#
+- hosts: minimal
+  remote_user: ubuntu
+
+  tasks:
+  - block:
+      - name: Install basic packages
+        apt: name={{ item }} state=latest cache_valid_time=600
+        with_items:
+          - vim  # Just in case...
+          # Packages for NTP
+          - ntp
+          - ntpdate
+          # Packages that make my life easier when monitoring everything
+          - htop
+          - aptitude
+        become: yes
+        register: pkgs_install
+    rescue:
+      # Only happens on a brand new machine that has never updated apt
+      - name: update apt's cache
+        apt:
+          update_cache: yes
+        become: yes
+      - name: Install basic packages
+        apt: name={{ item }} state=latest cache_valid_time=600
+        with_items:
+          - vim  # Just in case...
+          # Packages for NTP
+          - ntp
+          - ntpdate
+          # Packages that make my life easier when monitoring everything
+          - htop
+          - aptitude
+        become: yes
+        register: pkgs_install
+
+  - name: Restart NTP
+    service:
+      name: ntp
+      state: restarted
+    become: yes
+    when: pkgs_install.changed
+
+  - name: Configure vim to have basic, sane options
+    lineinfile:
+      dest: /etc/vim/vimrc
+      state: present
+      line: "{{ item }}"
+    with_items:
+      - "set bg=dark"
+      - "set nu"
+    become: yes
+
+# Uncomment the following task if a role ever moves to a new host
+#  - name: Clear /etc/hosts of any old entries
+#    lineinfile:
+#      dest: /etc/hosts
+#      regexp: '{{ item }}'
+#      state: absent
+#    with_items:
+#      - '{{msg_host}}'
+#      - '{{db_host}}'
+#      - '{{crx_host}}'
+#    become: yes
+
+  - name: Ensure dbling is listed in /etc/hosts
+    lineinfile:
+      dest: /etc/hosts
+      insertafter: '127\.0\.0\.1'
+      state: present
+      line: '{{ item.ip }}  {{ item.host }}'
+    with_items:
+      - { ip: '127.0.1.1', host: '{{ansible_hostname}}' }
+      - { ip: '{{msg_ip}}', host: '{{msg_host}}' }
+      - { ip: '{{db_ip}}', host: '{{db_host}}' }
+      - { ip: '{{crx_ip}}', host: '{{crx_host}}' }
+    become: yes
+
+  #
+  #  Access control stuff
+  #
+  - name: Create group "celery", needed by celery init scripts
+    group:
+      name: celery
+      state: present
+    become: yes
+
+  - name: Create user "celery", needed by celery init scripts
+    user:
+      name: celery
+      group: celery
+      state: present
+      createhome: no
+    become: yes
+
+  - name: Add user "ubuntu" to the celery group
+    user:
+      name: ubuntu
+      groups: celery  # Note that it's "groups" not "group"
+      append: yes
+      state: present
+    become: yes
+
+  - name: Sync the secrets
+    synchronize:
+      src: secret
+      dest: "{{ code_dir }}"
+
+  - name: move ssh keys to ~/.ssh then copy pub key to authorized_keys and set proper permissions
+    shell: mv dblings-key dblings-key.pub ~/.ssh/ && cat ~/.ssh/dblings-key.pub >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/dblings-key ~/.ssh/authorized_keys
+    args:
+      chdir: "{{ code_dir }}/secret"
+      creates: ~/.ssh/dblings-key
+
+  - name: Empty the known_hosts file
+    copy:
+      dest: /home/ubuntu/.ssh/known_hosts
+      content: ""
+      mode: 0600
+
+
+
+#
+#  Actions common to all dbling crawler nodes
+#
+- hosts: crawlers
+  remote_user: ubuntu
+
+  tasks:
+  #
+  #  Graph Tool Repos
+  #
+  - name: add the apt key for graph-tool
+    apt_key:
+      keyserver: pgp.skewed.de
+      id: 612DEFB798507F25
+      state: present
+    become: yes
+
+  - name: add the first repo for graph-tool to apt
+    apt_repository:
+      repo: "deb http://downloads.skewed.de/apt/{{ ansible_lsb.codename }} {{ ansible_lsb.codename }} universe"
+      state: present
+      filename: graph-tool
+      update_cache: no
+    become: yes
+
+  - name: add the second repo for graph-tool to apt
+    apt_repository:
+      repo: "deb-src http://downloads.skewed.de/apt/{{ ansible_lsb.codename }} {{ ansible_lsb.codename }} universe"
+      state: present
+      filename: graph-tool
+      update_cache: no
+    become: yes
+
+  - name: Add Ubuntu repos for missing packages in 14.04
+    apt_repository:
+      repo: "{{ item }}"
+      state: present
+      update_cache: no
+    with_items:
+      - "ppa:ubuntu-toolchain-r/test"
+      - "ppa:fkrull/deadsnakes"
+    become: yes
+    when: ansible_distribution == 'Ubuntu' and ansible_distribution_version == '14.04'
+
+  #
+  #  General package installation
+  #
+  - name: update apt's cache
+    apt:
+      update_cache: yes
+    become: yes
+
+  - name: ensure required packages are at the latest version
+    apt: name={{ item }} state=latest cache_valid_time=600
+    with_items:
+      - rsync
+      - sendmail  # Required for email reports
+      - python3.5
+      - python3.5-dev
+      - python3-pip  # Pip ends up being shared by Python 3.4 and Python 3.5 on a 14.04 system
+      - python3-mysql.connector
+      - python3-graph-tool
+      # Prereqs for Python cryptography lib
+      - build-essential
+      - libssl-dev
+      - libffi-dev
+      - python-dev
+      # Locking (really only used by summarize, but best to have it on all crawlers)
+      - memcached
+    become: yes
+
+  - name: Install additional required packages (missing from Ubuntu 14.04)
+    apt: name={{ item }} state=latest cache_valid_time=600
+    with_items:
+      - libxml2-dev
+      - libxslt-dev
+    become: yes
+    when: ansible_distribution == 'Ubuntu' and ansible_distribution_version == '14.04'
+
+  - block:
+      - name: Check if we've created pip3.5 yet
+        command: pip3.5 freeze
+    rescue:
+      - name: Create a pip3.5 script
+        copy:
+          dest: /usr/bin/pip3.5
+          content: |
+            #!/usr/bin/env python3.5
+            import sys
+            from pip import main
+            if __name__ == '__main__':
+                sys.exit(main())
+          owner: root
+          group: root
+          mode: 0755
+        become: yes
+
+  #
+  #  Sync the code, install the libraries it uses
+  #
+  - name: ensure directory for the code exists
+    file:
+      dest: "{{ code_dir }}"
+      state: directory
+      owner: ubuntu
+      group: celery
+    become: yes
+
+  - name: ensure directories for extensions exist
+    file:
+      dest: /var/lib/dbling
+      state: directory
+      owner: ubuntu
+      group: ubuntu
+    become: yes
+
+  - name: sync the source files
+    synchronize:
+      src: "{{ item }}"
+      dest: "{{ code_dir }}"
+    with_items:
+      - common
+      - crawl
+      - merl
+    register: sync_sources
+
+  - name: ensure dir for dbling's logs exists
+    file:
+      dest: "{{ code_dir }}/log"
+      state: directory
+      group: celery
+      owner: ubuntu
+      mode: 0775
+    become: yes
+
+  - name: create crx log file that's writable by celery user
+    copy:
+      dest: "{{ code_dir }}/log/crx.log"
+      content: ""
+      force: no
+      group: celery
+      owner: ubuntu
+      mode: 0664
+    become: yes
+
+  - name: ensure dir for dbling's sitemaps exists
+    file:
+      dest: "{{ code_dir }}/crawl/sitemaps"
+      state: directory
+      group: celery
+      owner: ubuntu
+      mode: 0775
+    become: yes
+
+  - name: install python libraries
+    pip:
+      executable: pip3.5
+      requirements: "{{ code_dir }}/{{ item }}/requirements.txt"
+    with_items:
+      - common
+      - crawl
+      - merl
+      - secret
+    become: yes
+
+
+
+#
+#  Actions for the database server
+#
+- hosts: db-server
+  remote_user: ubuntu
+
+  tasks:
+  - include_vars:
+      file: "{{ item }}"
+    with_items:
+      - 'secret/passes.yml'
+      - 'config/disk_uuids.yml'
+
+  #
+  #  Cinder Volume Setup
+  #
+  - name: Ensure MySQL mount point exists, is world-readable
+    file:
+      state: directory
+      path: "{{ mysql_mount_point }}"
+      owner: root
+      group: root
+      mode: 0755
+    become: yes
+
+  - name: Ensure Cinder volume is mounted (MySQL)
+    mount:
+      state: mounted
+      src: "UUID={{ mysql_disk_uuid }}"
+      name: "{{ mysql_mount_point }}" # As of Ansible 2.3, the "name" option has been changed to "path" as default, but "name" still works as well.
+      fstype: ext4
+      opts: defaults
+      dump: 0
+      passno: 2
+    become: yes
+
+  #
+  #  MySQL Setup and Configuration
+  #
+  - block:
+      - name: ensure mysql packages are at the latest version
+        apt: name={{ item }} state=latest cache_valid_time=600
+        with_items:
+          - mysql-server
+          - mysql-client
+        become: yes
+    rescue:
+      - debug: msg="We must be changing versions of MySQL. Deleting /var/lib/mysql/debian-*.flag and trying again."
+      - name: Deleting /var/lib/mysql/debian-*.flag
+        file:
+          path: "/var/lib/mysql/debian-{{ item }}.flag"
+          state: absent
+        with_items:
+          - 5.5
+          - 5.7
+        become: yes
+      - name: ensure mysql packages are at the latest version
+        apt:
+          name: "{{ item }}"
+          state: latest
+          cache_valid_time: 600
+          force: yes
+        with_items:
+          - mysql-server
+          - mysql-client
+        become: yes
+
+  - name: Install MySQLdb for Python 3 (16.04 only)
+    apt: name=python3-mysqldb state=latest cache_valid_time=600
+    become: yes
+    when: ansible_distribution == 'Ubuntu' and ansible_distribution_version == '16.04'
+
+  - name: Install mysqlclient library for Python 3 (14.04 only)
+    pip:
+      executable: pip3.5
+      name: mysqlclient
+    become: yes
+    when: ansible_distribution == 'Ubuntu' and ansible_distribution_version == '14.04'
+
+  - block:
+    - name: set root password for MySQL
+      mysql_user:
+        name: root
+        password: '{{ mysql_rt_pass }}'
+    rescue:
+    - debug:
+        msg: "Unable to set root password, likely because it has already been set without the credentials file being \
+          dropped. Attempting to drop credentials file now, which should give us access."
+    always:
+    - name: drop file with new login for MySQL
+      template:
+        src: config/my.cnf
+        dest: ~/.my.cnf
+        mode: 0600
+
+  - name: ensure the `chrome` database exists
+    mysql_db:
+      name: chrome
+      state: present
+    register: db_chrome
+
+  - name: set up privileges for user on host 'localhost'
+    mysql_user:
+      name: '{{ mysql_dbling_user }}'
+      host: localhost
+      password: '{{ mysql_dbling_pass }}'
+      state: present
+      priv: 'chrome.*:SELECT,INSERT,UPDATE,CREATE,ALTER'
+    register: db_perm_local
+
+  - name: set up privileges for user on hosts '10.90.%'
+    mysql_user:
+      name: '{{ mysql_dbling_user }}'
+      host: '10.90.%'
+      password: '{{ mysql_dbling_pass }}'
+      state: present
+      priv: 'chrome.*:SELECT,INSERT,UPDATE'
+    register: db_perm_remote
+
+  - name: bind MySQL to listen to all incoming connections
+    lineinfile:
+      dest: /etc/mysql/mysql.conf.d/mysqld.cnf
+      state: present
+      line: 'bind-address            = *'
+      regexp: 'bind-address.*'
+    become: yes
+    register: mysql_conf_changed
+
+  - name: Check how many simultaneous client connections MySQL allows
+    mysql_variables:
+      variable: max_connections
+    register: max_conn_value
+
+  - debug:
+      var: max_conn_value
+
+  - name: Allow 800 simultaneous client connections to MySQL
+    mysql_variables:
+      # See https://dev.mysql.com/doc/refman/5.7/en/too-many-connections.html for more info on this setting
+      variable: max_connections
+      value: 800
+    when: max_conn_value.msg != "800"
+    register: multiple_connections
+
+  - name: Check how many simultaneous client connections MySQL allows
+    mysql_variables:
+      variable: max_connections
+    register: max_conn_value
+
+  - debug:
+      var: max_conn_value
+
+  - name: restart mysql if the configuration made any changes
+    service:
+      name: mysql
+      state: restarted
+    when: db_chrome.changed or db_perm_local.changed or db_perm_remote.changed or mysql_conf_changed.changed or multiple_connections.changed
+    become: yes
+
+
+
+#
+#  Actions for the messaging server
+#
+- hosts: crawl-msg-server
+  remote_user: ubuntu
+  vars:
+    fileno_limit: 64000
+
+  tasks:
+  - include_vars:
+      file: 'secret/passes.yml'
+
+  #
+  #  Improving file limits
+  #
+#  - name: Raise open file limit in /etc/sysctl.conf
+#    lineinfile:
+#      dest: /etc/sysctl.conf
+#      line: "fs.file-max = {{ fileno_limit }}"
+#      state: present
+#    become: yes
+#    register: sysctl_conf
+#
+#  - name: Restart procps if sysctl changed
+#    command: service procps start
+#    become: yes
+#    when: sysctl_conf.changed
+
+  - name: Raise open file limit in /etc/security/limits.conf
+    lineinfile:
+      dest: /etc/security/limits.conf
+      line: "*  {{ item }}  nofile  {{ fileno_limit }}"
+      state: present
+      insertafter: "^$"  # Add the lines after the first blank line
+    with_items:
+      - soft
+      - hard
+    become: yes
+    register: security_limits_conf
+
+  - name: Configure PAM-based limits
+    lineinfile:
+      dest: "/etc/pam.d/{{ item }}"
+      line: "session    required   pam_limits.so"
+      state: present
+    with_items:
+      - common-session
+      - common-session-noninteractive
+    become: yes
+    register: pam_limits
+
+  #
+  #  RabbitMQ Setup and Configuration
+  #
+  - name: Add the apt key for RabbitMQ
+    # This and the next task are necessary because the version of RabbitMQ available in Ubuntu 16.04 is incompatible with systemd
+    apt_key:
+      url: "https://www.rabbitmq.com/rabbitmq-release-signing-key.asc"
+      state: present
+    become: yes
+    when: ansible_distribution == 'Ubuntu' and ansible_distribution_version == '16.04'
+
+  - name: Add RabbitMQ APT repository
+    apt_repository:
+      repo: "deb http://www.rabbitmq.com/debian/ testing main"
+      state: present
+      filename: rabbitmq
+      update_cache: yes
+    become: yes
+    when: ansible_distribution == 'Ubuntu' and ansible_distribution_version == '16.04'
+    register: rabbitmq_add_repo
+
+  - name: update apt's cache
+    apt:
+      update_cache: yes
+    become: yes
+    when: rabbitmq_add_repo.changed
+
+  - name: ensure rabbitmq-server is at the latest version
+    apt:
+      name: rabbitmq-server
+      state: latest
+    become: yes
+
+  - name: Raise open file limit
+    lineinfile:
+      dest: /etc/default/rabbitmq-server
+      line: "ulimit -n {{ fileno_limit }}"
+      state: present
+    become: yes
+    register: rabbitmq_default_fileno
+
+  - name: Add dbling user to RabbitMQ as administrator
+    rabbitmq_user:
+      user: '{{ rabbit_user }}'
+      password: '{{ rabbit_pass }}'
+      state: present
+      tags: administrator
+      permissions:
+        - vhost: /
+          configure_priv: .*
+          write_priv: .*
+          read_priv: .*
+    become: yes
+
+  - name: enable RabbitMQ management console
+    rabbitmq_plugin:
+      name: rabbitmq_management
+      state: enabled
+    become: yes
+    register: plugin_enabled
+
+  - name: Restart rabbitmq-server if config changed (plugin or file limit)
+    service:
+      name: rabbitmq-server
+      state: restarted
+    become: yes
+    when: plugin_enabled.changed or security_limits_conf.changed or rabbitmq_default_fileno.changed or pam_limits.changed
+
+
+
+#
+#  Actions for the CRX server
+#
+- hosts: crx-server
+  remote_user: ubuntu
+
+  tasks:
+  - include_vars:
+      file: 'config/disk_uuids.yml'
+
+  #
+  #  Cinder Volume Setup
+  #
+  - name: Ensure Cinder volume is mounted (CRXs)
+    mount:
+      state: mounted
+      src: "{{ item.src }}"
+      name: "{{ item.path }}" # As of Ansible 2.3, the "name" option has been changed to "path" as default, but "name" still works as well.
+      fstype: ext4
+      opts: defaults
+      dump: 0
+      passno: 2
+    with_items:
+      - { src: 'UUID={{ crx_disk_uuid }}', path: '/var/lib/dbling' }
+    become: yes
+
+
+
+#
+#  Actions for the crawler summarizers
+#
+- hosts: crawl-summarize
+  remote_user: ubuntu
+
+  tasks:
+  - name: Set up celery daemon service
+    include: tasks/celeryd.yml
+    vars:
+      queue: " -Q summarize"
+
+
+
+#
+#  Actions for the crawler workers
+#
+- hosts: crawl-workers
+  remote_user: ubuntu
+
+  tasks:
+  - name: Set up celerybeat service on first worker
+    include: tasks/celerybeat.yml
+    when: ansible_host.endswith('-1')
+
+  - name: ensure sshfs, upstart, fuse, and ecryptfs-utils are at latest version
+    apt: name={{ item }} state=latest cache_valid_time=600
+    with_items:
+      - sshfs
+      - upstart
+      - fuse
+      - ecryptfs-utils
+    become: yes
+
+  - name: configure fuse to allow other users to access the remote directory
+    lineinfile:
+      dest: /etc/fuse.conf
+      state: present
+      regexp: '^#?user_allow_other'
+      line: 'user_allow_other'
+    become: yes
+
+  - name: copy sshfs configuration
+    copy:
+      src: config/crawler-sshfs.service
+      dest: /etc/systemd/system/crawler-sshfs.service
+      owner: root
+      group: root
+      mode: 0644
+    become: yes
+
+  - name: enable and start sshfs service
+    systemd:
+      daemon_reload: yes
+      name: crawler-sshfs.service
+      enabled: yes
+      state: started
+    become: yes
+
+  - name: Set up celery daemon service
+    include: tasks/celeryd.yml
+    vars:
+      queue: ""
+
+  - name: ensure home directory for celery exists (needed for eCryptfs)
+    file:
+      dest: /home/celery
+      state: directory
+      owner: celery
+      group: celery
+    become: yes

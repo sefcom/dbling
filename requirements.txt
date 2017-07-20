@@ -1,12 +1,8 @@
-netifaces
-docopt
-pexpect
-beautifulsoup4
-requests
-matplotlib
-networkx
-pyparsing==1.5.7
-colorama
-lxml
-sqlalchemy
-plotly
+ansible
+-r common/requirements.txt
+-r crawl/requirements.txt
+-r profiler/requirements.txt
+-r merl/requirements.txt
+-r other/requirements.txt
+-r secret/requirements.txt
+-r drive_api/requirements.txt

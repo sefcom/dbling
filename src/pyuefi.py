@@ -1,1 +1,0 @@
-../deps/pyuefi/src/pyuefi.py

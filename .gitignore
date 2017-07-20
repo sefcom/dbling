@@ -4,3 +4,11 @@
 images
 src/dbling_conf.json
 src/chrome_ext.db
+*.merl
+secret/
+.vagrant/
+*.bak
+*.retry
+*.log
+*.gddraw
+*.gdsheet
