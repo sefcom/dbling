@@ -22,4 +22,3 @@ class PeopleAPI:
         if True:
             contacts = self.get_contacts()
             print_json(contacts)
-

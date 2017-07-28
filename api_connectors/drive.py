@@ -82,7 +82,7 @@ class DriveAPI:
                 try:
                     print(file["id"])
                     print(comment["id"])
-                    replies = self.service.replies().list(fileId=file["id"],commentId=comment["id"],
+                    replies = self.service.replies().list(fileId=file["id"], commentId=comment["id"],
                                                                 fields="kind,replies").execute()
                 except discovery.HttpError:
                     continue
@@ -107,17 +107,18 @@ class DriveAPI:
         return replies, parent_ids
 
     # files
+    #nextPageToken, files(id, name, mimeType, modifiedByMeTime, size, version,"
+                                  #" description, modifiedTime, viewedByMe, modifiedByMe, createdTime, md5Checksum,"
+                                  #" starred
     # TODO Account for paging
     def get_file_data(self):
         results = self.service.files().list(
-            pageSize=1000, fields="nextPageToken, files(id, name)").execute()
+            pageSize=1000, fields="*").execute()
         # items = results.get('files', [])
         if not results:
             return None
         else:
             return results
-
-
 
     # Application Data Folder
     def get_app_folder(self):
@@ -142,11 +143,11 @@ class DriveAPI:
         if False:
             changes = self.get_changes()
             print_json(changes)
-        if True:
+        if False:
             comments, ids = self.get_comments()
             print_json(comments)
             print_json(ids)
-            if True:
+            if False:
                 replies, parents = self.get_replies(comments, ids)
                 print_json(replies)
                 print_json(ids)
