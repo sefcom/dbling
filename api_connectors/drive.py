@@ -9,9 +9,12 @@ class DriveAPI:
 
     # about
     def get_about(self):
-        results = self.service.about().get(fields="kind,maxUploadSize,teamDriveThemes,"
-                                                  "maxImportSizes,storageQuota,importFormats,"
-                                                  "appInstalled,folderColorPalette,exportFormats,user")\
+        """
+        Retrieves information about the user's Drive. and system capabilities.
+
+        :return: JSON
+        """
+        results = self.service.about().get(fields="*")\
             .execute()
 
         if not results:
@@ -20,8 +23,8 @@ class DriveAPI:
             return results
 
     # CHANGES #################
-    def get_start_page_token(self):
-        token = self.service.changes().getStartPageToken(supportsTeamDrives=False).execute()
+    def get_start_page_token(self, supports_team_drive=False):
+        token = self.service.changes().getStartPageToken(supportsTeamDrives=supports_team_drive).execute()
         return token
 
     # Needs to loop over all changes using pageToken from start_token and nextPageToken token
@@ -112,8 +115,7 @@ class DriveAPI:
                                   #" starred
     # TODO Account for paging
     def get_file_data(self):
-        results = self.service.files().list(
-            pageSize=1000, fields="*").execute()
+        results = self.service.files().list(pageSize=1000, fields="id").execute()
         # items = results.get('files', [])
         if not results:
             return None
@@ -122,9 +124,8 @@ class DriveAPI:
 
     # Application Data Folder
     def get_app_folder(self):
-        response = self.service.files().list(spaces='appDataFolder',
-                                              fields='nextPageToken, files(id, name)',
-                                              pageSize=10).execute()
+        response = self.service.files().list(spaces='appDataFolder', fields='nextPageToken, files(id, name)',
+                                             pageSize=10).execute()
         return response
 
     # TODO make more modular / configurable
@@ -133,7 +134,7 @@ class DriveAPI:
             print("File Data")
             metadata = self.get_file_data()
             print_json(metadata)
-        if False:
+        if True:
             print("About")
             about_info = self.get_about()
             print_json(about_info)

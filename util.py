@@ -9,6 +9,15 @@ from oauth2client import tools
 
 
 def get_credentials(scope, application_name, secret, credential_file):
+    """
+    Creates credential file for accessing Google APIs.
+
+    :param str scope: String of Scopes separated by spaces to give access to different Google APIs
+    :param str application_name: Name of this Application
+    :param str secret: The secret file given from Google
+    :param str credential_file: Name of the credential file to be created
+    :return: Credential Object
+    """
     cur_dir = os.path.dirname(os.path.realpath('__FILE__'))
     credential_dir = os.path.join(cur_dir, '.credentials')
     if not os.path.exists(credential_dir):
@@ -23,14 +32,30 @@ def get_credentials(scope, application_name, secret, credential_file):
     return credentials
 
 
-def set_http():
+def set_http(is_domain_wide=False, impersonated_user_email=None):
+    """
+    Creates http object used to comunicate with Google
+    :param boolean is_domain_wide:
+    :param str impersonated_user_email: Email address of the User to be impersonated.
+    :return: http object
+    """
     credentials = get_credentials(env.SCOPES, env.APPLICATION_NAME, env.CLIENT_SECRET_FILE, env.CREDENTIAL_FILE)
-    http = credentials.authorize(httplib2.Http())
+    if is_domain_wide:
+        http = credentials.create_delegated(impersonated_user_email)
+    elif is_domain_wide and impersonated_user_email is None:
+        return False
+    else:
+        http = credentials.authorize(httplib2.Http())
     return http
 
 
 # Was going to fix and make this better. Google APIs return json so just made a simple print_json method.
 def pretty_print(obj):
+    """
+    Method to print json
+    :param obj: JSON object
+    :return: nothing
+    """
     if type(obj) == dict:
         for k, v in obj.items():
             if hasattr(v, '__iter__'):
@@ -49,4 +74,9 @@ def pretty_print(obj):
 
 
 def print_json(obj):
+    """
+    Method to print JSON in human readable format
+    :param obj: JSON object
+    :return: nothing
+    """
     print(json.dumps(obj, sort_keys=True, indent=2))

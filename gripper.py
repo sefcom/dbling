@@ -10,8 +10,11 @@ def main():
 
     http = util.set_http()
 
+    if not http:
+        print("If using domain wide authority please supply an email to impersonate.")
+
     # Get Drive Data
-    if False:
+    if True:
         drive = DriveAPI(http)
         drive.get_all()
     # Get Plus Data
@@ -22,9 +25,13 @@ def main():
     if False:
         people = PeopleAPI(http)
         people.get_all()
-    if True:
+    if False:
         admin = GSuiteAdminAPI(http)
         admin.get_all()
+
+    # Domain wide delegation of authority
+
+
 
 
 if __name__ == '__main__':

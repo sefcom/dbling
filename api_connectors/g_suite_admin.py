@@ -48,6 +48,16 @@ class GSuiteAdminAPI:
         mobile_info = self.service.chromeosdevices().get(customerId=customer_id, resourceId=resource_id).execute()
         return mobile_info
 
+    def suspend_user_account(self, user_email):
+        request_body = {"suspended": True}
+        return_info = self.service.users.update(userKey=user_email, body=request_body).execute()
+        return return_info
+
+    def unsuspend_user_account(self, user_email):
+        request_body = {"suspended": False}
+        return_info = self.service.users.update(userKey=user_email, body=request_body).execute()
+        return return_info
+    
     def get_all(self):
         if True:
             print_json(self.test())
