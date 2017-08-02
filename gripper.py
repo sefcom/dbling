@@ -2,7 +2,7 @@ from api_connectors.drive import DriveAPI
 from api_connectors.plus import PlusAPI
 from api_connectors.people import PeopleAPI
 from api_connectors.g_suite_admin import GSuiteAdminAPI
-
+from api_connectors.gmail import GmailAPI
 import util
 
 
@@ -14,7 +14,7 @@ def main():
         print("If using domain wide authority please supply an email to impersonate.")
 
     # Get Drive Data
-    if True:
+    if False:
         drive = DriveAPI(http)
         drive.get_all()
     # Get Plus Data
@@ -25,9 +25,12 @@ def main():
     if False:
         people = PeopleAPI(http)
         people.get_all()
-    if False:
+    if True:
         admin = GSuiteAdminAPI(http)
         admin.get_all()
+    if False:
+        gmail = GmailAPI(http)
+        gmail.get_all()
 
     # Domain wide delegation of authority
 

@@ -1,12 +1,15 @@
 from util import print_json
+from apiclient import http
 from apiclient import discovery
 
+import io
+import os
 
 class DriveAPI:
 
     def __init__(self, http):
         self.service = discovery.build('drive', 'v3', http=http)
-
+        self.http = http
     # about
     def get_about(self):
         """
@@ -97,8 +100,6 @@ class DriveAPI:
             parent_ids.append(comment_ids[i])
             i += 1
 
-
-
         #if drive_file["comments"]:
         #    return_ids.append(data["id"])
         #    for comment in drive_file["comments"]:
@@ -114,14 +115,55 @@ class DriveAPI:
                                   #" description, modifiedTime, viewedByMe, modifiedByMe, createdTime, md5Checksum,"
                                   #" starred
     # TODO Account for paging
-    def get_file_data(self):
-        results = self.service.files().list(pageSize=1000, fields="id").execute()
-        # items = results.get('files', [])
-        if not results:
+    def get_file_data(self, fields="*"):
+        results = self.service.files().list(pageSize=1000,).execute()
+        items = results.get('files', [])
+        if not items:
             return None
         else:
-            return results
+            return items
 
+    #def export_drive_file(self, file_id, mime_type):
+
+    def convert_mime_type(self, google_mime_type):
+        return True
+        #switch()
+
+    def download_files(self, file_list_array=None, fields="*"):
+        if not file_list_array:
+            file_list_array = self.get_file_data(fields=fields)
+
+        print_json(file_list_array)
+        path = os.getcwd()
+
+        if not os.path.exists(path + "/files"):
+            os.mkdir("files")
+        if not os.path.exists(path + "/drive-files"):
+            os.mkdir("drive-files")
+
+        for file in file_list_array:
+            if "google-apps" not in str(file["mimeType"]):
+                continue
+                os.chdir(path + "/files")
+                request = self.service.files().get_media(fileId=file["id"])
+                fh = io.FileIO(file["name"], 'wb')
+                downloader = http.MediaIoBaseDownload(fh, request)
+                done = False
+                while done is False:
+                    status, done = downloader.next_chunk()
+                    print(file["name"])
+                    print("Download %d%%." % int(status.progress() * 100))
+            elif "folder" not in str(file["mimeType"]):
+                os.chdir(path + "/drive-files")
+
+                request = self.service.files().export(fileId=file["id"], mimeType="application/pdf")
+                fh = io.FileIO(file["name"], 'wb')
+                downloader = http.MediaIoBaseDownload(fh, request)
+                done = False
+                while done is False:
+                    status, done = downloader.next_chunk()
+                    print(file["name"])
+                    print("Download %d%%." % int(status.progress() * 100))
     # Application Data Folder
     def get_app_folder(self):
         response = self.service.files().list(spaces='appDataFolder', fields='nextPageToken, files(id, name)',
@@ -134,7 +176,7 @@ class DriveAPI:
             print("File Data")
             metadata = self.get_file_data()
             print_json(metadata)
-        if True:
+        if False:
             print("About")
             about_info = self.get_about()
             print_json(about_info)
@@ -156,3 +198,5 @@ class DriveAPI:
             app_folder = self.get_app_folder()
             print_json(app_folder)
 
+        if True:
+            self.download_files()

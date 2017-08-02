@@ -1,39 +1,16 @@
-# Google API Fingeprinter
-
-Access many APIs and aquire as much user identifing information as possible.
-
-## Getting Started
-
-Only has been tested in a Linux enviroment. 
-
-Install python 3
-
-Install google api python client
-pip3 install --upgrade google-api-python-client
+<a target="_blank" href="https://chrome.google.com/webstore/detail/ehbhjpchdgepkgjhfkhpkjdbnljedllm">![Try it now in CWS](https://raw.github.com/GoogleChrome/chrome-app-samples/master/tryitnowbutton.png "Click here to install this sample from the Chrome Web Store")</a>
 
 
-### Prerequisites
+# Filesystem access
 
+Shows basic usage of accessing (read/write) files and directories using the `chrome.fileSystem` API.
 
-### Installing
+NOTE: This sample requires Milestone 31 or later of Chrome, since it uses the new directory permission.
 
+## APIs
 
-### Bugs or Issues
-
-If you receive this error:
-```
-Failed to start a local webserver listening on either port 8080
-or port 8090. Please check your firewall settings and locally
-running programs that may be blocking or using those ports.
-```
-
-use: lsof -w -n -i tcp:8080 or lsof -w -n -i tcp:8090 respectively.
-then: kill -9 PID
-
-Or you can click the click provided in the terminal and then copy and paste
-the key from the webpage.
-
-## Authors
-
-* **Daniel Caruso II** - *Creator* - [Daniel Caruso II](http://10.90.3.18/dmcaruso)
+* [chrome.fileSystem](http://developer.chrome.com/apps/fileSystem.html)
+     
+## Screenshot
+![screenshot](/samples/filesystem-access/assets/screenshot_1280_800.png)
 

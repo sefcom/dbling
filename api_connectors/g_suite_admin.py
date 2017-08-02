@@ -26,8 +26,8 @@ class GSuiteAdminAPI:
         user = self.service.users().get(userKey=user_email).execute()
         return user
 
-    def get_all_users(self):
-        users = self.service.users().list().execute()
+    def get_all_users(self, domain_name):
+        users = self.service.users().list(domain=domain_name).execute()
         return users
 
     # chromeosdevices
@@ -60,4 +60,4 @@ class GSuiteAdminAPI:
     
     def get_all(self):
         if True:
-            print_json(self.test())
+            print_json(self.get_all_users("adamdoupe.com"))
