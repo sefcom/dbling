@@ -80,3 +80,25 @@ def print_json(obj):
     :return: nothing
     """
     print(json.dumps(obj, sort_keys=True, indent=2))
+
+
+def convert_mime_type(google_mime_type):
+    """
+    Converts mimeType given from google to one of our choosing
+    :param google_mime_type: mimeType given from Google API
+    :return: conversion mimeType - string
+    """
+    if google_mime_type == 'application/vnd.google-apps.document':
+        conversion_type = env.G_DOCUMENT_TO
+    elif google_mime_type == 'application/vnd.google-apps.drawing':
+        conversion_type = env.G_DRAWINGS_TO
+    elif google_mime_type == 'application/vnd.google-apps.presentation':
+        conversion_type = env.G_PRESENTATION_TO
+    elif google_mime_type == 'application/vnd.google-apps.spreadsheet':
+        conversion_type = env.G_SHEET_TO
+    elif google_mime_type == 'application/vnd.google-apps.script':
+        conversion_type = env.G_APPS_SCRIPTS
+    else:
+        conversion_type = False
+
+    return conversion_type
