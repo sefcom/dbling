@@ -3,7 +3,7 @@
 client_secret.json
 .idea/
 
-
+*.pyc
 ## File-based project format:
 *.iws
 

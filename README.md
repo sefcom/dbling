@@ -1,10 +1,10 @@
-# Google API Fingeprinter
+# Google API Acquisition Tool
 
-Access many APIs and aquire as much user identifing information as possible.
+Access many APIs and aquire as much user identifying information as possible.
 
 ## Getting Started
 
-Only has been tested in a Linux enviroment.
+Only has been tested in a Linux environment.
 
 Install python 3
 
@@ -31,7 +31,7 @@ use: lsof -w -n -i tcp:8080 or lsof -w -n -i tcp:8090 respectively.
 then: kill -9 PID
 
 Or you can click the click provided in the terminal and then copy and paste
-the key from the webpage.
+the key from the webpage that is launched.
 
 ## Authors
 

@@ -2,117 +2,158 @@ from util import print_json
 from apiclient import http as _http
 from apiclient import discovery
 from util import convert_mime_type
+from env import DOWNLOAD_DIRECTORY
 import io
 import os
 
 
 class DriveAPI:
+    """
+    Class to interact with Google Drive APIs
 
+    https://developers.google.com/resources/api-libraries/documentation/drive/v3/python/latest/index.html
+    """
     def __init__(self, http):
         """
         Sets service object to make API calls to Google
+
+        https://developers.google.com/drive/v3/web/quickstart/python
         :param http: http object
+        :return DriveAPI Object
         """
+
         self.service = discovery.build('drive', 'v3', http=http)
 
     def get_about(self, fields='*'):
         """
         Retrieves information about the user's Drive. and system capabilities.
 
+        https://developers.google.com/drive/v3/reference/about
+        :param fields: fields to be returned
+        :type fields: string
         :return: JSON
         """
-        results = self.service.about().get(fields=fields)\
-            .execute()
 
+        # So I can do this.. perfect
+        about = self.service.about()
+        results = about.get(fields=fields).execute()
+
+        # why do I have this?
         if not results:
             return None
         else:
             return results
 
-    def get_start_page_token(self, supports_team_drive=False):
-        """
-        Gets the start page token, used to keep track of changes
-        :param supports_team_drive:
-        :return: JSON
-        """
-        token = self.service.changes().getStartPageToken(supportsTeamDrives=supports_team_drive).execute()
-        return token
+            # Needs to loop over all changes using pageToken from start_token and nextPageToken token
 
-    # Needs to loop over all changes using pageToken from start_token and nextPageToken token
-    # This might not be useful. Start token is something that would be acquired when a program like Google Drive first
-    # installs. Then to check to for updates you would use that to get the next page and compare file changes ect ect.
-    # TODO More testing if this is actually needed.
-    # TODO BROKEN Logic
+    # For time-line creation and aquiring user files this is not useful.
+    # This would be useful for an file syncing application
     def get_changes(self, fields='kind,comments'):
         """
+        Returns list of changes for a google drive account
 
-        :param fields:
-        :return:
+        https://developers.google.com/drive/v3/reference/changes
+        :param fields: fields to be returned
+        :type fields: string
+        :return: JSON
         """
-        # v3 might be broken or the API page isn't up to date
-        # self.service = discovery.build('drive', 'v2', http=self.http)
 
         start_token = self.get_start_page_token()
         changes = self.service.changes().list(pageToken=start_token['pageToken']).execute()
         while True:
-            new_changes = self.service.changes().list(pageToken=changes['nextPageToken'], fields=fields)\
-                .execute()
+            new_changes = self.service.changes().list(pageToken=changes['nextPageToken'], fields=fields).execute()
             print_json(new_changes)
             if changes['changes']:
                 break
             changes['changes'] += new_changes['changes']
         return changes
 
-    # Comments
-    # should get all Comments per file
-    # Get all files
-    # loop over files
-    # get all comments per file
-    # TODO loop over pages if multiple pages exist
-    # TODO make this method depend on get_file_data so I am not calling that twice
-    def get_comments(self, fields='kind,comments'):
+    def get_start_page_token(self, supports_team_drive=False, team_drive_id=None):
         """
+        Gets the start page token, used to keep track of changes
 
-        :param fields:
-        :return:
+        getStartPageToken: https://developers.google.com/drive/v3/reference/changes/getStartPageToken
+        :param supports_team_drive: Whether the requesting application supports Team Drives. (Default: False)
+        :type supports_team_drive: boolean
+        :param team_drive_id: the ID of the team drive
+        :type team_drive_id: string
+        :return: JSON or None if improper params are in use
         """
-        file_data = self.get_file_data()
-        comments = []
-        return_ids = []
+        # Test to make sure you need both params
+        if team_drive_id is None:
+            token = self.service.changes().getStartPageToken().execute()
+        elif supports_team_drive is True:
+            token = self.service.changes().getStartPageToken(supportsTeamDrives=supports_team_drive).execute()
+        else:
+            print("Need to specify team_drive_id if application supports team drive")
+            return None
+        return token
+
+    # Comments
+    # TODO Test paging and that replies are returned
+    def get_comments(self, fields='kind,comments', file_data=None):
+        """
+        Retrieves Comments from a Google Document. This includes gdocs, gsheets, ect
+
+        https://developers.google.com/drive/v3/reference/comments
+        :param fields: fields to be returned
+        :type fields: string
+        :param file_data: list of files
+        :type file_data: JSON
+        :return: JSON
+        """
+        if file_data is None:
+            file_data = self.get_file_data()
+
         for data in file_data['files']:
 
             try:
                 drive_file = self.service.comments().list(fileId=data['id'], fields=fields).execute()
+            # Could never figure out the cause of this random exception
             except discovery.HttpError:
                 continue
 
             if drive_file['comments']:
-                return_ids.append(data['id'])
-                comments.append(drive_file['comments'])
+                return_ids = drive_file.get('id', [])
+                comments = drive_file.get('comments', [])
+
+                while 'nextPageToken' in drive_file:
+                    try:
+                        drive_file = self.service.comments().list(filedId=['id'], fields=fields,
+                                                                  pageToken=drive_file['nextPageToken']).execute()
+                    # Could never figure out the cause of this random exception
+                    except discovery.HttpError:
+                        continue
+                    return_ids.append(drive_file.get('id', []))
+                    comments.append(drive_file.get('comments', []))
 
         return comments, return_ids
 
-    # TODO PAGINGS JUST LIKE EVERYTHING ELSE
-    # appears comments get replies the way I have it set up currently....
+    # This method is not needed, replies can easily be pulled through the get_comments method.
+    # PAGING Needs to be fixed if method is to be used
     def get_replies(self, comment_data, comment_ids, fields='kind,replies'):
         """
+        Returns replies for a Google Document
+
+        https://developers.google.com/drive/v3/reference/replies
 
         :param comment_data:
         :param comment_ids:
-        :param fields:
-        :return:
+        :param fields: fields to be returned
+        :type fields: string
+        :return: JSON
         """
         parent_ids = []
         replies = []
         # loop over each entry to get all comments for document
-        for file in comment_data:
+        for file_data in comment_data:
             i = 0
             temp = []
-            for comment in file:
+            for comment in file_data:
                 try:
-                    print(file['id'])
+                    print(file_data['id'])
                     print(comment['id'])
-                    replies = self.service.replies().list(fileId=file['id'], commentId=comment['id'],
+                    replies = self.service.replies().list(fileId=file_data['id'], commentId=comment['id'],
                                                           fields=fields).execute()
                 except discovery.HttpError:
                     continue
@@ -124,7 +165,7 @@ class DriveAPI:
             parent_ids.append(comment_ids[i])
             i += 1
 
-        #if drive_file["comments"]:
+        # if drive_file["comments"]:
         #    return_ids.append(data["id"])
         #    for comment in drive_file["comments"]:
         #        comments.append(comment)
@@ -134,108 +175,164 @@ class DriveAPI:
 
         return replies, parent_ids
 
-    # files
-    #nextPageToken, files(id, name, mimeType, modifiedByMeTime, size, version,"
-                                  #" description, modifiedTime, viewedByMe, modifiedByMe, createdTime, md5Checksum,"
-                                  #" starred
-    # TODO Account for paging
     def get_file_data(self):
         """
+        Returns list of files in the users drive.
 
-        :return:
+        https://developers.google.com/drive/v3/reference/files/list
+        :return: JSON
         """
-        results = self.service.files().list(pageSize=1000,).execute()
-        items = results.get('files', [])
+        response = self.service.files().list(pageSize=100).execute()
+
+        items = response.get('files', [])
+        while 'nextPageToken' in response:
+            response = self.service.files().list(pageSize=100, pageToken=str(response["nextPageToken"])).execute()
+            items.append(response.get('files', []))
+
         if not items:
             return None
         else:
             return items
 
-    def export_drive_file(self, file, path):
+    def export_drive_file(self, file_data, path):
         """
+        Exports and converts .g* files to real files and then downloads them
 
-        :param file:
-        :param path:
-        :return:
+        https://developers.google.com/drive/v3/reference/files/export
+
+        :param file_data: List of file(s) to be downloaded
+        :type file_data: JSON
+        :param path: Path where the file will be downloaded
+        :return: boolean True if downloads succeeded, False if Downloads failed.
         """
-        mime_type = convert_mime_type(file['mimeType'])
+        mime_type = convert_mime_type(file_data['mimeType'])
 
         if not mime_type:
-            print('mime type is not found dumping file\'s information')
-            print_json(file)
-            print('ending execution.')
-            return -1
+            print('mime type is not found, dumping file\'s information')
+            print_json(file_data)
+            return False
 
         os.chdir(path + '/drive-files')
 
-        request = self.service.files().export(fileId=file['id'], mimeType=mime_type)
-        fh = io.FileIO(file['name'], 'wb')
+        request = self.service.files().export(fileId=file_data['id'], mimeType=mime_type)
+        fh = io.FileIO(file_data['name'], 'wb')
         downloader = _http.MediaIoBaseDownload(fh, request)
         done = False
         while done is False:
             status, done = downloader.next_chunk()
-            print(file['name'])
+            print(file_data['name'])
             print('Download %d%%.' % int(status.progress() * 100))
 
-    def export_real_file(self, file, path):
-        """
+        return True
 
-        :param file:
-        :param path:
-        :return:
+    def export_real_file(self, file_data, path):
+        """
+        Downloads real files. AKA not .g*
+
+        https://developers.google.com/drive/v3/reference/files/export
+        :param file_data: List of file(s) to be downloaded
+        :type file_data: JSON
+        :param path: Path where the file will be downloaded
+        :return: Nothing
         """
         os.chdir(path + '/files')
-        request = self.service.files().get_media(fileId=file['id'])
-        fh = io.FileIO(file['name'], 'wb')
+        request = self.service.files().get_media(fileId=file_data['id'])
+        fh = io.FileIO(file_data['name'], 'wb')
         downloader = _http.MediaIoBaseDownload(fh, request)
         done = False
         while done is False:
             status, done = downloader.next_chunk()
-            print(file['name'])
+            print(file_data['name'])
             print('Download %d%%.' % int(status.progress() * 100))
 
+    # TODO MAKE file downloads maintain same directory structure
     def download_files(self, file_list_array=None):
         """
+        Downloads files from the user's drive
 
-        :param file_list_array:
-        :param fields:
-        :return:
+        https://developers.google.com/drive/v3/web/manage-downloads
+        :param file_list_array: list of file(s) to be downloaded
+        :type file_list_array: array
+        :return: Nothing
         """
         if not file_list_array:
             file_list_array = self.get_file_data()
 
         print_json(file_list_array)
-        path = os.getcwd()
+        # If download directory is set us it for the download folder.
+        # Otherwise use the directory of this project
+        if DOWNLOAD_DIRECTORY is None:
+            path = os.getcwd()
+        else:
+            path = DOWNLOAD_DIRECTORY
 
         if not os.path.exists(path + '/files'):
             os.mkdir('files')
         if not os.path.exists(path + '/drive-files'):
             os.mkdir('drive-files')
 
-        for file in file_list_array:
-            if 'google-apps' not in str(file['mimeType']):
-                self.export_real_file(file, path)
+        for file_data in file_list_array:
+            if 'google-apps' not in str(file_data['mimeType']):
+                self.export_real_file(file_data, path)
 
-            elif 'folder' not in str(file['mimeType']):
-                self.export_drive_file(file, path)
+            elif 'folder' not in str(file_data['mimeType']):
+                download_succeeded = self.export_drive_file(file_data, path)
+
+                # In the event of a Mime Type conversion error the download process will stop
+                if download_succeeded is False:
+                    print("Error has occurred, process was aborted.")
 
     def get_app_folder(self, fields='nextPageToken, files(id, name)'):
         """
+        Returns the data in the users app data folder
 
-        :param fields:
-        :return:
+        https://developers.google.com/drive/v3/reference/files/list
+
+        :param fields: fields to be returned
+        :type fields: string
+        :return: JSON
         """
-        response = self.service.files().list(spaces='appDataFolder', fields=fields,
-                                             pageSize=10).execute()
-        return response
+        response = self.service.files().list(spaces='appDataFolder', fields=fields, pageSize=10).execute()
 
-    # TODO make more modular / configurable
+        items = response.get('files', [])
+        while "nextPageToken" in response:
+            response = self.service.files().list(spaces='appDataFolder', pageSize=1000,
+                                                 pageToken=str(response["nextPageToken"])).execute()
+            items.append(response.get('files', []))
+
+        if not items:
+            return None
+        else:
+            return items
+
+    def get_photo_data(self, fields='nextPageToken, files(id,name)'):
+        """
+        Returns the data about the user's photos
+
+        https://developers.google.com/drive/v3/reference/files/list
+
+        :param fields: fields to be returned
+        :type fields: string
+        :return: JSON
+        """
+        response = self.service.files().list(spaces='photos', fields=fields, pageSize=10).execute()
+        items = response.get('files', [])
+        while "nextPageToken" in response:
+            response = self.service.files().list(spaces='photos', pageSize=1000,
+                                                 pageToken=str(response["nextPageToken"])).execute()
+            items.append(response.get('files', []))
+
+        if not items:
+            return None
+        else:
+            return items
+
     def get_all(self):
         """
         method used for testing
         :return: nothing
         """
-        if False:
+        if True:
             print('File Data')
             metadata = self.get_file_data()
             print_json(metadata)
@@ -261,5 +358,5 @@ class DriveAPI:
             app_folder = self.get_app_folder()
             print_json(app_folder)
 
-        if True:
+        if False:
             self.download_files()

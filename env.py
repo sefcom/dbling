@@ -1,6 +1,9 @@
+# This file is obtained from Google through the API pages. Guide posted below
+# https://developers.google.com/identity/protocols/OAuth2WebServer
+# Look for Create authorization credentials subsection
 CLIENT_SECRET_FILE = 'client_secret.json'
-# scopes are getting out of hand
-# TODO make a system that concats list depending on what methods are going to be called?
+
+# Scope: https://developers.google.com/drive/v3/web/about-auth
 SCOPES = 'https://www.googleapis.com/auth/drive.readonly ' \
          'https://www.googleapis.com/auth/drive.appfolder ' \
          'https://www.googleapis.com/auth/plus.login ' \
@@ -39,6 +42,9 @@ application/vnd.google-apps.drive-sdk	  3rd party shortcut
 '''
 
 # Export Mime Type Conversions
+# Information on MIMI types:
+#        https://developers.google.com/drive/v3/web/mime-types
+#        https://developers.google.com/drive/v3/web/integrate-open
 '''
 Google Doc Format	Conversion Format	       Corresponding MIME type
 Documents	        HTML	                   text/html
@@ -70,6 +76,7 @@ Presentations	    MS PowerPoint	           application/vnd.openxmlformats-office
 Apps Scripts	    JSON	                   application/vnd.google-apps.script+json
 '''
 
+#
 G_DOCUMENT_TO = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 G_SHEET_TO = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 G_DRAWINGS_TO = 'image/jpeg'

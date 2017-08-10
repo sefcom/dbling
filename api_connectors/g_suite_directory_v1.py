@@ -7,6 +7,8 @@ class GSuiteDirectoryAPI:
     def __init__(self, http):
         """
         Sets service object to make API calls to Google
+
+        https://developers.google.com/admin-sdk/directory/v1/quickstart/python
         :param http: http object
         """
         self.service = discovery.build('admin', 'directory_v1', http=http)
@@ -14,7 +16,9 @@ class GSuiteDirectoryAPI:
     def test(self):
         """
         example method from Google API quickstart page
-        :return:
+
+        https://developers.google.com/admin-sdk/directory/v1/quickstart/python
+        :return: nothing
         """
         results = self.service.users().list(customer='my_customer', maxResults=10, orderBy='email').execute()
         users = results.get('users', [])
@@ -29,6 +33,8 @@ class GSuiteDirectoryAPI:
     def get_user(self, user_email):
         """
         Gets information for a single user specified by their email
+
+        https://developers.google.com/admin-sdk/directory/v1/reference/users/get
         :param user_email: user's email
         :return: JSON
         """
@@ -38,15 +44,19 @@ class GSuiteDirectoryAPI:
     def get_all_users(self, domain_name):
         """
         Returns all users in the domain
+
+        https://developers.google.com/admin-sdk/directory/v1/reference/users/list
         :param domain_name: the name of the domain
         :return: JSON
         """
         users = self.service.users().list(domain=domain_name).execute()
         return users
 
-    def list_users_chromeos_device(self, customer_id):
+    def list_users_chrome_os_device(self, customer_id):
         """
         Lists all chromeos_devices owned by a customer.
+
+        https://developers.google.com/admin-sdk/directory/v1/reference/chromeosdevices/list
         :param customer_id: The unique ID for the customer's G Suite account.
         :return: JSON
         """
@@ -55,7 +65,9 @@ class GSuiteDirectoryAPI:
 
     def get_chrome_os_devices_properties(self, customer_id, device_id):
         """
-        Get data pertaining to a single chrome os device
+        Get data pertaining to a single ChromeOS device
+
+        https://developers.google.com/admin-sdk/directory/v1/reference/chromeosdevices/get
         :param customer_id: The unique ID for the customer's G Suite account
         :param device_id: unique ID for the device.
         :return: JSON
@@ -65,26 +77,33 @@ class GSuiteDirectoryAPI:
 
     def list_customers_mobile_devices_properties(self, customer_id):
         """
-        lists device properties for all devices on the account.
+        Gets list of mobile devices owned by a customer.
+
+        https://developers.google.com/admin-sdk/directory/v1/reference/mobiledevices/list
         :param customer_id: The unique ID for the customer's G Suite account
-        :return:
+        :return: JSON
         """
         mobiles = self.service.mobiledevices().list(customerId=customer_id).execute()
         return mobiles
 
     def get_mobile_devices_properties(self, customer_id, resource_id):
         """
-        Returns information for a single device
+        Get data pertaining to a single mobile device
+
+        https://developers.google.com/admin-sdk/directory/v1/reference/mobiledevices/get
         :param customer_id: The unique ID for the customer's G Suite account
         :param resource_id: The unique ID the API service uses to identify the mobile device.
         :return: JSON
         """
-        mobile_info = self.service.chromeosdevices().get(customerId=customer_id, resourceId=resource_id).execute()
+        mobile_info = self.service.mobiledevices().get(customerId=customer_id, resourceId=resource_id).execute()
         return mobile_info
 
     def suspend_user_account(self, user_email):
         """
         Suspends an user's account
+
+        https://developers.google.com/admin-sdk/directory/v1/reference/users/update
+        https://developers.google.com/admin-sdk/directory/v1/guides/manage-users
         :param user_email: Email for the user to be suspended
         :return: JSON
         """
@@ -95,6 +114,9 @@ class GSuiteDirectoryAPI:
     def unsuspend_user_account(self, user_email):
         """
         Un-suspends a user's account
+
+        https://developers.google.com/admin-sdk/directory/v1/reference/users/update
+        https://developers.google.com/admin-sdk/directory/v1/guides/manage-users
         :param user_email: Email for the user to be un-suspended
         :return: JSON
         """

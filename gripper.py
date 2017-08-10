@@ -13,10 +13,11 @@ def main():
     http = util.set_http()
 
     if not http:
-        print('If using domain wide authority please supply an email to impersonate.')
-
+        print("Errors have occurred. Note above for solutions.")
+        # yeah its bad practice to return in the middle of a file. but oh well this file is just for testing
+        return False
     # Get Drive Data
-    if False:
+    if True:
         drive = DriveAPI(http)
         drive.get_all()
     # Get Plus Data
@@ -33,7 +34,7 @@ def main():
     if False:
         gmail = GmailAPI(http)
         gmail.get_all()
-    if True:
+    if False:
         reports = GSuiteReportsAPI(http)
         reports.get_all()
     # Domain wide delegation of authority

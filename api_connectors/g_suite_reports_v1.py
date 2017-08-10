@@ -7,14 +7,18 @@ class GSuiteReportsAPI:
     def __init__(self, http):
         """
         Sets service object to make API calls to Google
+
+        https://developers.google.com/admin-sdk/reports/v1/quickstart/python
         :param http: http object
         """
         self.service = discovery.build('admin', 'reports_v1', http=http)
 
     def test(self):
         """
+        Test method from Google quickstart page
 
-        :return:
+        https://developers.google.com/admin-sdk/reports/v1/quickstart/python
+        :return: nothing
         """
         results = self.service.activities().list(userKey='all', applicationName='login', maxResults=10).execute()
         activities = results.get('items', [])
@@ -31,19 +35,32 @@ class GSuiteReportsAPI:
         """
         Returns the last 180 days of activities.
 
-        :param user_key:
-        :param application_name:
-        :return:
+        https://developers.google.com/admin-sdk/reports/v1/reference/activities/list
+        :param user_key: The value can be all or a userKey.
+        :param application_name: name of application from a list viewable on the reference page
+        :return: JSON
         """
         activities = self.service.activities().list(userKey=user_key, applicationName=application_name).execute()
-        return activities
+        items = activities.get('files', [])
+        while "nextPageToken" in activities:
+            activities = self.service.files().list(spaces='appDataFolder', pageSize=1000,
+                                                   pageToken=str(activities["nextPageToken"])).execute()
+            items.append(activities.get('files', []))
 
-    def list_customer_usage_reports(self, date, customer_id=False):
+        if not items:
+            return None
+        else:
+            return items
+
+    # Not useful for this project
+    def get_customer_usage_reports(self, date, customer_id=False):
         """
+        Gets customer usage reports
 
+        https://developers.google.com/admin-sdk/reports/v1/reference/customerUsageReports/get
         :param date:
         :param customer_id:
-        :return:
+        :return: JSON
         """
         if not customer_id:
             report = self.service.customerUsageReports().get(date=date).execute()
@@ -51,12 +68,15 @@ class GSuiteReportsAPI:
             report = self.service.activities().list().execute()
         return report
 
+    # Not useful for this project
     def get_user_usage_report(self, date, user_key='all'):
         """
+        Gets user usage report
 
+        https://developers.google.com/admin-sdk/reports/v1/reference/userUsageReport/get
         :param date:
         :param user_key:
-        :return:
+        :return: JSON
         """
         report = self.service.userUsageReport().get(date=date, userKey=user_key).execute()
         return report
@@ -72,7 +92,7 @@ class GSuiteReportsAPI:
             activities = self.list_activities()
             print_json(activities)
         if False:
-            reports = self.list_customer_usage_reports('2017-07-20')
+            reports = self.get_customer_usage_reports('2017-07-20')
             print_json(reports)
         if True:
             reports = self.get_user_usage_report('2017-07-31')
