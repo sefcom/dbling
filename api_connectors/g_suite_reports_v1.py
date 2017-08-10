@@ -40,12 +40,11 @@ class GSuiteReportsAPI:
         :param application_name: name of application from a list viewable on the reference page
         :return: JSON
         """
-        activities = self.service.activities().list(userKey=user_key, applicationName=application_name).execute()
-        items = activities.get('files', [])
-        while "nextPageToken" in activities:
-            activities = self.service.files().list(spaces='appDataFolder', pageSize=1000,
-                                                   pageToken=str(activities["nextPageToken"])).execute()
-            items.append(activities.get('files', []))
+        activities = self.service.activities().list(userKey=user_key, applicationName=application_name, maxResults=10).execute()
+        items = activities.get('items', [])
+        while 'nextPageToken' in activities:
+            activities = self.service.activities().list(userKey=user_key, applicationName=application_name, maxResults=10, pageToken=str(activities["nextPageToken"])).execute()
+            items.append(activities.get('items', []))
 
         if not items:
             return None
@@ -88,12 +87,12 @@ class GSuiteReportsAPI:
         """
         if False:
             self.test()
-        if False:
+        if True:
             activities = self.list_activities()
             print_json(activities)
         if False:
             reports = self.get_customer_usage_reports('2017-07-20')
             print_json(reports)
-        if True:
+        if False:
             reports = self.get_user_usage_report('2017-07-31')
             print_json(reports)

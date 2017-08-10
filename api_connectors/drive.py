@@ -46,8 +46,9 @@ class DriveAPI:
 
             # Needs to loop over all changes using pageToken from start_token and nextPageToken token
 
-    # For time-line creation and aquiring user files this is not useful.
+    # For time-line creation and acquiring user files this is not useful.
     # This would be useful for an file syncing application
+    # paging needs fixing
     def get_changes(self, fields='kind,comments'):
         """
         Returns list of changes for a google drive account
@@ -85,7 +86,7 @@ class DriveAPI:
         elif supports_team_drive is True:
             token = self.service.changes().getStartPageToken(supportsTeamDrives=supports_team_drive).execute()
         else:
-            print("Need to specify team_drive_id if application supports team drive")
+            print('Need to specify team_drive_id if application supports team drive')
             return None
         return token
 
@@ -186,7 +187,7 @@ class DriveAPI:
 
         items = response.get('files', [])
         while 'nextPageToken' in response:
-            response = self.service.files().list(pageSize=100, pageToken=str(response["nextPageToken"])).execute()
+            response = self.service.files().list(pageSize=100, pageToken=str(response['nextPageToken'])).execute()
             items.append(response.get('files', []))
 
         if not items:
@@ -280,7 +281,7 @@ class DriveAPI:
 
                 # In the event of a Mime Type conversion error the download process will stop
                 if download_succeeded is False:
-                    print("Error has occurred, process was aborted.")
+                    print('Error has occurred, process was aborted.')
 
     def get_app_folder(self, fields='nextPageToken, files(id, name)'):
         """
@@ -295,9 +296,9 @@ class DriveAPI:
         response = self.service.files().list(spaces='appDataFolder', fields=fields, pageSize=10).execute()
 
         items = response.get('files', [])
-        while "nextPageToken" in response:
+        while 'nextPageToken' in response:
             response = self.service.files().list(spaces='appDataFolder', pageSize=1000,
-                                                 pageToken=str(response["nextPageToken"])).execute()
+                                                 pageToken=str(response['nextPageToken'])).execute()
             items.append(response.get('files', []))
 
         if not items:
@@ -317,9 +318,9 @@ class DriveAPI:
         """
         response = self.service.files().list(spaces='photos', fields=fields, pageSize=10).execute()
         items = response.get('files', [])
-        while "nextPageToken" in response:
+        while 'nextPageToken' in response:
             response = self.service.files().list(spaces='photos', pageSize=1000,
-                                                 pageToken=str(response["nextPageToken"])).execute()
+                                                 pageToken=str(response['nextPageToken'])).execute()
             items.append(response.get('files', []))
 
         if not items:

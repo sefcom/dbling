@@ -6,12 +6,12 @@ from oauth2client import client
 from oauth2client.file import Storage
 from oauth2client import tools
 
-"""
+'''
 Google API Client Library Page
 https://developers.google.com/api-client-library/python/reference/pydoc
 Python Quick Start Page
 https://developers.google.com/drive/v3/web/quickstart/python
-"""
+'''
 
 
 def get_credentials(scope, application_name, secret, credential_file):
@@ -39,9 +39,9 @@ def get_credentials(scope, application_name, secret, credential_file):
             flow.user_agent = application_name
             credentials = tools.run_flow(flow, store)
     else:
-        print("Client Secret File is missing."
-              "\nPlease go to: https://developers.google.com/drive/v3/web/quickstart/python\n"
-              "To set up the secret file for OAuth 2.0")
+        print('Client Secret File is missing.\n'
+              'Please go to: https://developers.google.com/drive/v3/web/quickstart/python\n'
+              'To set up the secret file for OAuth 2.0')
         credentials = False
     return credentials
 
