@@ -13,7 +13,7 @@ class GmailAPI:
 
     def get_labels(self):
         """
-        returns a list of mailbox labesl
+        returns a list of mailbox labels
         :return: JSON
         """
         results = self.service.users().labels().list(userId='me').execute()

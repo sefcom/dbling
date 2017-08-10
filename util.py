@@ -106,7 +106,7 @@ def print_json(obj):
     print(json.dumps(obj, sort_keys=True, indent=2))
 
 
-def convert_mime_type(google_mime_type):
+def convert_mime_type_and_extension(google_mime_type):
     """
     Converts mimeType given from google to one of our choosing for export conversion
     This is necessary to download .g* files.
@@ -116,17 +116,24 @@ def convert_mime_type(google_mime_type):
     :param google_mime_type: mimeType given from Google API
     :return: string
     """
+
     if google_mime_type == 'application/vnd.google-apps.document':
         conversion_type = env.G_DOCUMENT_TO
+        extension = env.G_DOC_EXTENSION
     elif google_mime_type == 'application/vnd.google-apps.drawing':
         conversion_type = env.G_DRAWINGS_TO
+        extension = env.G_DRAW_EXTENSION
     elif google_mime_type == 'application/vnd.google-apps.presentation':
         conversion_type = env.G_PRESENTATION_TO
+        extension = env.G_PRES_EXTENSION
     elif google_mime_type == 'application/vnd.google-apps.spreadsheet':
         conversion_type = env.G_SHEET_TO
+        extension = env.G_SHEET_EXTENSION
     elif google_mime_type == 'application/vnd.google-apps.script':
         conversion_type = env.G_APPS_SCRIPTS
+        extension = env.G_APPS_EXTENSION
     else:
         conversion_type = False
+        extension = False
 
-    return conversion_type
+    return conversion_type, extension

@@ -1,7 +1,7 @@
 from util import print_json
 from apiclient import http as _http
 from apiclient import discovery
-from util import convert_mime_type
+from util import convert_mime_type_and_extension
 from env import DOWNLOAD_DIRECTORY
 import io
 import os
@@ -103,6 +103,8 @@ class DriveAPI:
         :type file_data: JSON
         :return: JSON
         """
+        return_ids = []
+        comments = []
         if file_data is None:
             file_data = self.get_file_data()
 
@@ -115,8 +117,8 @@ class DriveAPI:
                 continue
 
             if drive_file['comments']:
-                return_ids = drive_file.get('id', [])
-                comments = drive_file.get('comments', [])
+                return_ids.append(drive_file.get('id', []))
+                comments.append(drive_file.get('comments', []))
 
                 while 'nextPageToken' in drive_file:
                     try:
@@ -206,9 +208,9 @@ class DriveAPI:
         :param path: Path where the file will be downloaded
         :return: boolean True if downloads succeeded, False if Downloads failed.
         """
-        mime_type = convert_mime_type(file_data['mimeType'])
+        mime_type, extension = convert_mime_type_and_extension(file_data['mimeType'])
 
-        if not mime_type:
+        if not mime_type or not extension:
             print('mime type is not found, dumping file\'s information')
             print_json(file_data)
             return False
@@ -216,7 +218,7 @@ class DriveAPI:
         os.chdir(path + '/drive-files')
 
         request = self.service.files().export(fileId=file_data['id'], mimeType=mime_type)
-        fh = io.FileIO(file_data['name'], 'wb')
+        fh = io.FileIO(file_data['name'] + extension, 'wb')
         downloader = _http.MediaIoBaseDownload(fh, request)
         done = False
         while done is False:
@@ -264,13 +266,15 @@ class DriveAPI:
         # Otherwise use the directory of this project
         if DOWNLOAD_DIRECTORY is None:
             path = os.getcwd()
+            print(path)
         else:
-            path = DOWNLOAD_DIRECTORY
+            path = os.path.expanduser(DOWNLOAD_DIRECTORY)
+            print(path)
 
         if not os.path.exists(path + '/files'):
-            os.mkdir('files')
+            os.mkdir(path + '/files')
         if not os.path.exists(path + '/drive-files'):
-            os.mkdir('drive-files')
+            os.mkdir(path + '/drive-files')
 
         for file_data in file_list_array:
             if 'google-apps' not in str(file_data['mimeType']):
@@ -333,7 +337,7 @@ class DriveAPI:
         method used for testing
         :return: nothing
         """
-        if True:
+        if False:
             print('File Data')
             metadata = self.get_file_data()
             print_json(metadata)
@@ -359,5 +363,5 @@ class DriveAPI:
             app_folder = self.get_app_folder()
             print_json(app_folder)
 
-        if False:
+        if True:
             self.download_files()
