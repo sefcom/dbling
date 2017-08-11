@@ -76,10 +76,11 @@ Presentations	    MS PowerPoint	           application/vnd.openxmlformats-office
 Apps Scripts	    JSON	                   application/vnd.google-apps.script+json
 '''
 
-#
+# Currently set to MS Suite office files
 G_DOCUMENT_TO, G_DOC_EXTENSION = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', '.docx'
 G_SHEET_TO, G_SHEET_EXTENSION = 'application/x-vnd.oasis.opendocument.spreadsheet', '.xlsx'
 G_DRAWINGS_TO, G_DRAW_EXTENSION = 'image/jpeg', ',jpeg'
-G_PRESENTATION_TO, G_PRES_EXTENSION = 'application/vnd.openxmlformats-officedocument.presentationml.presentation', '.pptx'
+G_PRESENTATION_TO, G_PRES_EXTENSION = 'application/vnd.openxmlformats-officedocument.presentationml.presentation',\
+                                      '.pptx'
 G_APPS_SCRIPTS, G_APPS_EXTENSION = 'application/vnd.google-apps.script+json', '.json'
-
+G_APPS_FOLDER = 'application/vnd.google-apps.folder'
