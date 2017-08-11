@@ -1,12 +1,12 @@
 # Google API Acquisition Tool
 
-Access many APIs and aquire as much user identifying information as possible.
+Access many APIs and acquire as much user identifying information as possible.
 
 ## Getting Started
 
 Only has been tested in a Linux environment.
 
-Install python 3
+Install python 3 / pip3
 
 Install google api python client
 pip3 install --upgrade google-api-python-client

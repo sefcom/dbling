@@ -1,7 +1,15 @@
 # This file is obtained from Google through the API pages. Guide posted below
 # https://developers.google.com/identity/protocols/OAuth2WebServer
 # Look for Create authorization credentials subsection
-CLIENT_SECRET_FILE = 'client_secret.json'
+CLIENT_SECRET_FILE = ''
+
+# name of the file that is made by get_credentials
+CREDENTIAL_FILE = ''
+# name of the application
+APPLICATION_NAME = 'dbling'
+# Optional, if set to a path the user's drive files will be downloaded to that location
+DOWNLOAD_DIRECTORY = None
+
 
 # Scope: https://developers.google.com/drive/v3/web/about-auth
 SCOPES = 'https://www.googleapis.com/auth/drive.readonly ' \
@@ -15,10 +23,6 @@ SCOPES = 'https://www.googleapis.com/auth/drive.readonly ' \
          'https://www.googleapis.com/auth/admin.directory.customer.readonly ' \
          'https://www.googleapis.com/auth/admin.reports.audit.readonly ' \
          'https://www.googleapis.com/auth/admin.reports.usage.readonly'
-
-CREDENTIAL_FILE = 'dbling.json'
-APPLICATION_NAME = 'dbling'
-DOWNLOAD_DIRECTORY = '~/Desktop'
 
 # Google Media MIME Types
 '''
@@ -76,6 +80,7 @@ Presentations	    MS PowerPoint	           application/vnd.openxmlformats-office
 Apps Scripts	    JSON	                   application/vnd.google-apps.script+json
 '''
 
+# There are used for exporting .g* file types to real files.
 # Currently set to MS Suite office files
 G_DOCUMENT_TO, G_DOC_EXTENSION = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', '.docx'
 G_SHEET_TO, G_SHEET_EXTENSION = 'application/x-vnd.oasis.opendocument.spreadsheet', '.xlsx'

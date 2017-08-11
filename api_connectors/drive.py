@@ -179,7 +179,7 @@ class DriveAPI:
 
         return replies, parent_ids
 
-    def list_file_data(self, fields='files(id,name,mimeType,parents)'):
+    def list_file_data(self, fields='files(id,name,mimeType,parents,trashed)'):
         """
         Returns list of files in the users drive.
 
@@ -187,7 +187,7 @@ class DriveAPI:
         :return: JSON
         """
         response = self.service.files().list(pageSize=100, fields=fields).execute()
-        print_json(response)
+
         items = response.get('files', [])
         while 'nextPageToken' in response:
             response = self.service.files().list(pageSize=100, fields=fields,
@@ -251,6 +251,11 @@ class DriveAPI:
             print('Download %d%%.' % int(status.progress() * 100))
 
     # I am sorry for the recursion Mike...
+    # TODO Sort the file list so that there is no need to check from the beginning every time
+    # For some reason the orderby in the get_file_data() call works and puts folders first but
+    # at some point it can put a file before the folders in the list which required this block of
+    # code to be written horribly.
+    # TODO fix this bug
     def handle_folder_helper(self, file_data_list, path, curr_folder_id):
         # Loop over all file data
         for file_data in file_data_list:
@@ -279,7 +284,6 @@ class DriveAPI:
         # Get root id
         root_id = self.get_root_file_id()
         # recursively download everything in the drive
-
         self.handle_folder_helper(file_list_array, path, root_id)
 
     def get_root_file_id(self):
@@ -287,9 +291,8 @@ class DriveAPI:
         print_json(root_id)
         return root_id['id']
 
-    # TODO MAKE file downloads maintain same directory structure
     # TODO HANDLE TRASH....
-    def download_files(self, file_list_array=None):
+    def download_files(self, file_list_array=False):
         """
         Downloads files from the user's drive
 
@@ -301,28 +304,31 @@ class DriveAPI:
         if not file_list_array:
             file_list_array = self.list_file_data()
 
-        # print_json(file_list_array)
         # If download directory is set us it for the download folder.
         # Otherwise use the directory of this project
         if DOWNLOAD_DIRECTORY is None:
             path = os.getcwd()
         else:
             path = os.path.expanduser(DOWNLOAD_DIRECTORY)
+        if not os.path.exists(path + '/trash'):
+            os.mkdir(path + '/trash')
 
-        self.handle_folders(file_list_array, path)
-        '''
-
+        # Download trashed files first
         for file_data in file_list_array:
-            if 'google-apps' not in str(file_data['mimeType']):
-                self.export_real_file(file_data, path)
+            if file_data['trashed']:
+                if 'google-apps' not in str(file_data['mimeType']):
+                    self.export_real_file(file_data, path + '/trash')
 
-            elif 'folder' not in str(file_data['mimeType']):
-                download_succeeded = self.export_drive_file(file_data, path)
+                elif 'folder' not in str(file_data['mimeType']):
+                    download_succeeded = self.export_drive_file(file_data, path + '/trash')
 
-                # In the event of a Mime Type conversion error the download process will stop
-                if download_succeeded is False:
-                    print('Error has occurred, process was aborted.')
-    '''
+                    # In the event of a Mime Type conversion error the download process will stop
+                    if download_succeeded is False:
+                        print('Error has occurred, process was aborted.')
+
+        # Now download the rest of them
+        self.handle_folders(file_list_array, path)
+
     def get_app_folder(self, fields='nextPageToken, files(id, name)'):
         """
         Returns the data in the users app data folder
