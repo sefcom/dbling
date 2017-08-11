@@ -3,6 +3,7 @@ from apiclient import http as _http
 from apiclient import discovery
 from util import convert_mime_type_and_extension
 from env import DOWNLOAD_DIRECTORY
+from env import G_APPS_FOLDER
 import io
 import os
 
@@ -178,18 +179,19 @@ class DriveAPI:
 
         return replies, parent_ids
 
-    def get_file_data(self):
+    def get_file_data(self, fields='files(id,name,mimeType,parents)'):
         """
         Returns list of files in the users drive.
 
         https://developers.google.com/drive/v3/reference/files/list
         :return: JSON
         """
-        response = self.service.files().list(pageSize=100).execute()
-
+        response = self.service.files().list(pageSize=100, fields=fields).execute()
+        print_json(response)
         items = response.get('files', [])
         while 'nextPageToken' in response:
-            response = self.service.files().list(pageSize=100, pageToken=str(response['nextPageToken'])).execute()
+            response = self.service.files().list(pageSize=100, fields=fields,
+                                                 pageToken=str(response['nextPageToken']), orderBy='folder').execute()
             items.append(response.get('files', []))
 
         if not items:
@@ -215,7 +217,7 @@ class DriveAPI:
             print_json(file_data)
             return False
 
-        os.chdir(path + '/drive-files')
+        os.chdir(path)
 
         request = self.service.files().export(fileId=file_data['id'], mimeType=mime_type)
         fh = io.FileIO(file_data['name'] + extension, 'wb')
@@ -238,7 +240,7 @@ class DriveAPI:
         :param path: Path where the file will be downloaded
         :return: Nothing
         """
-        os.chdir(path + '/files')
+        os.chdir(path)
         request = self.service.files().get_media(fileId=file_data['id'])
         fh = io.FileIO(file_data['name'], 'wb')
         downloader = _http.MediaIoBaseDownload(fh, request)
@@ -248,7 +250,69 @@ class DriveAPI:
             print(file_data['name'])
             print('Download %d%%.' % int(status.progress() * 100))
 
+    # I am sorry for the recursion Mike...
+    def handle_folder_helper(self, folder_list, path, curr_folder_id, file_list_array, index=0):
+        for index in range(index, len(file_list_array)):
+            if file_list_array[index]['parents'][0] == curr_folder_id:
+                if file_list_array[index]['mimeType'] == G_APPS_FOLDER:
+                    os.mkdir(path + '/' + file_list_array[index]['name'])
+
+                if str(file_list_array[index]['parents'][0]) == str(file_list_array[index]['id']):
+                    if 'google-apps' not in str(file_list_array[index]['mimeType']):
+                        self.export_real_file(file_list_array[index], path + '/' + file_list_array[index]['name'])
+
+                    elif 'folder' not in str(file_list_array[index]['mimeType']):
+                        download_succeeded = self.export_drive_file(file_list_array[index], path + '/' + file_list_array[index]['name'])
+
+                        # In the event of a Mime Type conversion error the download process will stop
+                        if download_succeeded is False:
+                            print('Error has occurred, process was aborted.')
+                self.handle_folder_helper(file_list_array, path + '/' + file_list_array[index]['name'], file_list_array[index]['id'], file_list_array)
+
+        return True
+
+    # Always make sure you orderBy folder
+    def handle_folders(self, file_list_array, path):
+        # Step 1, Get a list of all folders
+        folder_list = []
+        for file_data in file_list_array:
+            if file_data['mimeType'] == G_APPS_FOLDER:
+                folder_list.append(file_data)
+
+        # Step 2 get list of root folders
+        # not sure if always true...
+        # assume first folder is always under root
+        root_id = folder_list[0]['parents'][0]
+        root_folder_list = []
+        for folder in folder_list:
+            if folder['parents'][0] == root_id:
+                root_folder_list.append(folder)
+                os.mkdir(path + '/' + folder['name'])
+
+        # Step 4 Download any files at root dir
+        for file_data in file_list_array:
+            if file_data['parents'][0] == root_id:
+                if 'google-apps' not in str(file_data['mimeType']):
+                    self.export_real_file(file_data, path)
+
+                elif 'folder' not in str(file_data['mimeType']):
+                    download_succeeded = self.export_drive_file(file_data, path)
+
+                    # In the event of a Mime Type conversion error the download process will stop
+                    if download_succeeded is False:
+                        print('Error has occurred, process was aborted.')
+
+        # Step 5 call recursion
+        for folder in root_folder_list:
+
+            self.handle_folder_helper(folder_list, path + '/' + folder['name'], folder['id'], file_list_array)
+
+
+        return folder_list
+
+
     # TODO MAKE file downloads maintain same directory structure
+    # TODO HANDLE TRASH....
     def download_files(self, file_list_array=None):
         """
         Downloads files from the user's drive
@@ -261,20 +325,16 @@ class DriveAPI:
         if not file_list_array:
             file_list_array = self.get_file_data()
 
-        print_json(file_list_array)
+        # print_json(file_list_array)
         # If download directory is set us it for the download folder.
         # Otherwise use the directory of this project
         if DOWNLOAD_DIRECTORY is None:
             path = os.getcwd()
-            print(path)
         else:
             path = os.path.expanduser(DOWNLOAD_DIRECTORY)
-            print(path)
 
-        if not os.path.exists(path + '/files'):
-            os.mkdir(path + '/files')
-        if not os.path.exists(path + '/drive-files'):
-            os.mkdir(path + '/drive-files')
+        self.handle_folders(file_list_array, path)
+        '''
 
         for file_data in file_list_array:
             if 'google-apps' not in str(file_data['mimeType']):
@@ -286,7 +346,7 @@ class DriveAPI:
                 # In the event of a Mime Type conversion error the download process will stop
                 if download_succeeded is False:
                     print('Error has occurred, process was aborted.')
-
+    '''
     def get_app_folder(self, fields='nextPageToken, files(id, name)'):
         """
         Returns the data in the users app data folder
