@@ -1,11 +1,10 @@
-from util import print_json
-from apiclient import http as _http
-from apiclient import discovery
-from util import convert_mime_type_and_extension
-from env import DOWNLOAD_DIRECTORY
-from env import G_APPS_FOLDER
 import io
 import os
+
+from apiclient import http as http_, discovery
+
+from env import DOWNLOAD_DIRECTORY, MIME
+from util import print_json, convert_mime_type_and_extension
 
 
 class DriveAPI:
@@ -19,6 +18,7 @@ class DriveAPI:
         Sets service object to make API calls to Google
 
         https://developers.google.com/drive/v3/web/quickstart/python
+
         :param http: http object
         :return DriveAPI Object
         """
@@ -30,6 +30,7 @@ class DriveAPI:
         Retrieves information about the user's Drive. and system capabilities.
 
         https://developers.google.com/drive/v3/reference/about
+
         :param fields: fields to be returned
         :type fields: string
         :return: JSON
@@ -55,6 +56,7 @@ class DriveAPI:
         Returns list of changes for a google drive account
 
         https://developers.google.com/drive/v3/reference/changes
+
         :param fields: fields to be returned
         :type fields: string
         :return: JSON
@@ -75,6 +77,7 @@ class DriveAPI:
         Gets the start page token, used to keep track of changes
 
         getStartPageToken: https://developers.google.com/drive/v3/reference/changes/getStartPageToken
+
         :param supports_team_drive: Whether the requesting application supports Team Drives. (Default: False)
         :type supports_team_drive: boolean
         :param team_drive_id: the ID of the team drive
@@ -98,6 +101,7 @@ class DriveAPI:
         Retrieves Comments from a Google Document. This includes gdocs, gsheets, ect
 
         https://developers.google.com/drive/v3/reference/comments
+
         :param fields: fields to be returned
         :type fields: string
         :param file_data: list of files
@@ -184,6 +188,7 @@ class DriveAPI:
         Returns list of files in the users drive.
 
         https://developers.google.com/drive/v3/reference/files/list
+
         :return: JSON
         """
         response = self.service.files().list(pageSize=100, fields=fields).execute()
@@ -221,7 +226,7 @@ class DriveAPI:
 
         request = self.service.files().export(fileId=file_data['id'], mimeType=mime_type)
         fh = io.FileIO(file_data['name'] + extension, 'wb')
-        downloader = _http.MediaIoBaseDownload(fh, request)
+        downloader = http_.MediaIoBaseDownload(fh, request)
         done = False
         while done is False:
             status, done = downloader.next_chunk()
@@ -235,6 +240,7 @@ class DriveAPI:
         Downloads real files. AKA not .g*
 
         https://developers.google.com/drive/v3/reference/files/export
+
         :param file_data: List of file(s) to be downloaded
         :type file_data: JSON
         :param path: Path where the file will be downloaded
@@ -243,7 +249,7 @@ class DriveAPI:
         os.chdir(path)
         request = self.service.files().get_media(fileId=file_data['id'])
         fh = io.FileIO(file_data['name'], 'wb')
-        downloader = _http.MediaIoBaseDownload(fh, request)
+        downloader = http_.MediaIoBaseDownload(fh, request)
         done = False
         while done is False:
             status, done = downloader.next_chunk()
@@ -262,7 +268,7 @@ class DriveAPI:
             # If file belong in current folder
             if str(file_data['parents'][0]) == str(curr_folder_id):
                 # make new folder if it is a folder
-                if str(file_data['mimeType']) == str(G_APPS_FOLDER):
+                if str(file_data['mimeType']) == str(MIME['g_folder']):
                     os.mkdir(path + '/' + file_data['name'])
                     # every time we make a new folder we recursively call
                     self.handle_folder_helper(file_data_list, path + '/' + file_data['name'], file_data['id'])
@@ -297,6 +303,7 @@ class DriveAPI:
         Downloads files from the user's drive
 
         https://developers.google.com/drive/v3/web/manage-downloads
+
         :param file_list_array: list of file(s) to be downloaded
         :type file_list_array: array
         :return: Nothing
@@ -377,6 +384,7 @@ class DriveAPI:
     def get_all(self):
         """
         method used for testing
+
         :return: nothing
         """
         if False:

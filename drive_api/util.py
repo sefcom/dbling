@@ -1,17 +1,18 @@
-import os
-import httplib2
-import json
-import env
-from oauth2client import client
-from oauth2client.file import Storage
-from oauth2client import tools
-
-'''
+"""
 Google API Client Library Page
 https://developers.google.com/api-client-library/python/reference/pydoc
 Python Quick Start Page
 https://developers.google.com/drive/v3/web/quickstart/python
-'''
+"""
+
+import json
+import os
+
+import httplib2
+from oauth2client import client, tools
+from oauth2client.file import Storage
+
+import env
 
 
 def get_credentials(scope, application_name, secret, credential_file):
@@ -19,6 +20,7 @@ def get_credentials(scope, application_name, secret, credential_file):
     Creates credential file for accessing Google APIs.
 
     https://developers.google.com/drive/v3/web/quickstart/python
+
     :param str scope: String of Scopes separated by spaces to give access to different Google APIs
     :param str application_name: Name of this Application
     :param str secret: The secret file given from Google
@@ -51,6 +53,7 @@ def set_http(is_domain_wide=False, impersonated_user_email=None):
     Creates http object used to communicate with Google
 
     https://developers.google.com/drive/v3/web/quickstart/python
+
     :param boolean is_domain_wide: Turn to True if using domain wide delegation to impersonate a user
     :param str impersonated_user_email: Email address of the User to be impersonated.
     :return: http object or False if incorrect Params are used
@@ -76,6 +79,7 @@ def set_http(is_domain_wide=False, impersonated_user_email=None):
 def pretty_print(obj):
     """
     Method to print json
+
     :param obj: JSON object
     :return: nothing
     """
@@ -113,23 +117,24 @@ def convert_mime_type_and_extension(google_mime_type):
     Information on MIME types:
         https://developers.google.com/drive/v3/web/mime-types
         https://developers.google.com/drive/v3/web/integrate-open
+
     :param google_mime_type: mimeType given from Google API
     :return: string
     """
 
-    if google_mime_type == 'application/vnd.google-apps.document':
+    if google_mime_type == env.MIME['g_doc']:
         conversion_type = env.G_DOCUMENT_TO
         extension = env.G_DOC_EXTENSION
-    elif google_mime_type == 'application/vnd.google-apps.drawing':
+    elif google_mime_type == env.MIME['g_draw']:
         conversion_type = env.G_DRAWINGS_TO
         extension = env.G_DRAW_EXTENSION
-    elif google_mime_type == 'application/vnd.google-apps.presentation':
+    elif google_mime_type == env.MIME['g_presentation']:
         conversion_type = env.G_PRESENTATION_TO
         extension = env.G_PRES_EXTENSION
-    elif google_mime_type == 'application/vnd.google-apps.spreadsheet':
+    elif google_mime_type == env.MIME['g_spreadsheet']:
         conversion_type = env.G_SHEET_TO
         extension = env.G_SHEET_EXTENSION
-    elif google_mime_type == 'application/vnd.google-apps.script':
+    elif google_mime_type == env.MIME['g_script']:
         conversion_type = env.G_APPS_SCRIPTS
         extension = env.G_APPS_EXTENSION
     else:

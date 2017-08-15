@@ -1,5 +1,6 @@
-from util import print_json
 from apiclient import discovery
+
+from util import print_json
 
 
 class GSuiteReportsAPI:
@@ -9,6 +10,7 @@ class GSuiteReportsAPI:
         Sets service object to make API calls to Google
 
         https://developers.google.com/admin-sdk/reports/v1/quickstart/python
+
         :param http: http object
         """
         self.service = discovery.build('admin', 'reports_v1', http=http)
@@ -18,6 +20,7 @@ class GSuiteReportsAPI:
         Test method from Google quickstart page
 
         https://developers.google.com/admin-sdk/reports/v1/quickstart/python
+
         :return: nothing
         """
         results = self.service.activities().list(userKey='all', applicationName='login', maxResults=10).execute()
@@ -36,6 +39,7 @@ class GSuiteReportsAPI:
         Returns the last 180 days of activities.
 
         https://developers.google.com/admin-sdk/reports/v1/reference/activities/list
+
         :param user_key: The value can be all or a userKey.
         :param application_name: name of application from a list viewable on the reference page
         :return: JSON
@@ -57,6 +61,7 @@ class GSuiteReportsAPI:
         Gets customer usage reports
 
         https://developers.google.com/admin-sdk/reports/v1/reference/customerUsageReports/get
+
         :param date:
         :param customer_id:
         :return: JSON
@@ -73,6 +78,7 @@ class GSuiteReportsAPI:
         Gets user usage report
 
         https://developers.google.com/admin-sdk/reports/v1/reference/userUsageReport/get
+
         :param date:
         :param user_key:
         :return: JSON
@@ -83,6 +89,7 @@ class GSuiteReportsAPI:
     def get_all(self):
         """
         Testing method
+
         :return: Nothing
         """
         if False:
