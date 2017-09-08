@@ -84,7 +84,6 @@ extension = Table('extension', DB_META,
                   mysql_engine='InnoDB',
                   mysql_default_charset='utf8mb4',
                   )
-extension.create(checkfirst=True)
 
 # Create the id_list table
 id_list = Table('id_list', DB_META,
@@ -95,7 +94,6 @@ id_list = Table('id_list', DB_META,
                 mysql_engine='InnoDB',
                 mysql_default_charset='utf8mb4',
                 )
-id_list.create(checkfirst=True)
 
 # Create the centroid_family table
 cent_fam = Table('centroid_family', DB_META,
@@ -125,4 +123,9 @@ cent_fam = Table('centroid_family', DB_META,
                  mysql_engine='InnoDB',
                  mysql_default_charset='utf8mb4',
                  )
-cent_fam.create(checkfirst=True)
+
+
+def init_db():
+    extension.create(checkfirst=True)
+    id_list.create(checkfirst=True)
+    cent_fam.create(checkfirst=True)

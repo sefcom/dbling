@@ -12,3 +12,4 @@ secret/
 *.log
 *.gddraw
 *.gdsheet
+docs/_build

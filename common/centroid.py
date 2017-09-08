@@ -70,15 +70,15 @@ class CentroidCalc:
         """An object to keep track of calculating a centroid for an extension.
 
         :param DblingGraph sub_tree: The graph object to use to calculate the
-            centroid. In addition to the graph property `has_encrypted_files`,
-            `sub_tree` must already have the following vertex properties
+            centroid. In addition to the graph property ``has_encrypted_files``,
+            ``sub_tree`` must already have the following vertex properties
             populated:
 
-            - `type`
-            - `filesize`
-            - `ctime`
-            - `filename_b_len`
-            - `mode`
+            - ``type``
+            - ``filesize``
+            - ``ctime``
+            - ``filename_b_len``
+            - ``mode``
         :param int block_size: Block size that eCryptfs uses. Should always be
             4096, but I thought I'd add it as an option just in case.
         """
@@ -106,7 +106,7 @@ class CentroidCalc:
         """Calculate the centroid for the tree.
 
         After calling this method, the centroid vector is available from the
-        :attr:`CentroidCalc.centroid` property.
+        :attr:`~CentroidCalc.centroid` property.
 
         :rtype: None
         """
@@ -208,16 +208,28 @@ class CentroidCalc:
 
     @property
     def centroid(self):
+        """The centroid vector.
+
+        :rtype: tuple
+        """
         if not self._cent_calculated:
             self.do_calc()
         return tuple(self.digr.gp['centroid'])
 
     @property
     def graph(self):
+        """Return a copy of the graph object.
+
+        :rtype: DblingGraph
+        """
         return self.digr.copy()
 
     @property
     def size(self):
+        """Return the number of vertices in the graph.
+
+        :rtype: int
+        """
         return self.digr.num_vertices()
 
     def _blocks_used(self, size, f_type, child_name_lens):

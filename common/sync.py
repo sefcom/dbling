@@ -1,4 +1,11 @@
 # *-* coding: utf-8 *-*
+"""Context manager for easily using a pymemcache mutex.
+
+The `acquire_lock` context manager makes it easy to use :mod:`pymemcache` (which
+uses memcached) to create a mutex for a certain portion of code. Of course,
+this requires the :mod:`pymemcache` library to be installed, which in turn
+requires `memcached <https://memcached.org>`_ to be installed.
+"""
 
 import json
 import logging
@@ -40,40 +47,39 @@ def acquire_lock(lock_id, wait=0, max_retries=0):
     This context manager can be used as a mutex by doing something like the
     following:
 
-    ::
+    >>> from time import sleep
+    >>> job_done = False
+    >>> while not job_done:
+    ...     try:
+    ...         with acquire_lock('some id'):
+    ...             sensitive_function()
+    ...             job_done = True
+    ...     except LockUnavailable:
+    ...         # Sleep for a couple seconds while the other code runs and
+    ...         # hopefully completes
+    ...         sleep(2)
 
-        >>> from time import sleep
-        >>> job_done = False
-        >>> while not job_done:
-        ...     try:
-        ...         with acquire_lock('some id'):
-        ...             sensitive_function()
-        ...             job_done = True
-        ...     except LockUnavailable:
-        ...         # Sleep for a couple seconds while the other code runs and
-        ...         # hopefully completes
-        ...         sleep(2)
+    In the above example, ``sensitive_function()`` should only be run if no
+    other code is also running it. A more concise way of writing the above
+    example would be to use the other parameters, like this:
 
-    In the above example, `sensitive_function()` should only be run if no other
-    code is also running it. A more concise way of writing the above example
-    would be to use the other parameters, like this:
+    >>> with acquire_lock('some id', wait=2):
+    ...     sensitive_function()
 
-    ::
-
-        >>> with acquire_lock('some id', wait=2):
-        ...     sensitive_function()
-
-    :param lock_id: The ID for this lock.
+    :param lock_id: The ID for this lock. See :mod:`pymemcache`'s documentation
+        on `key constraints
+        <https://pymemcache.readthedocs.io/en/latest/getting_started.html#key-constraints>`_
+        for more info.
     :type lock_id: str or bytes
     :param int wait: Indicates how many seconds after failing to acquire the
         lock to wait (sleep) before retrying. When set to 0 (default), will
-        immediately raise a :exception:`LockUnavailable` exception.
+        immediately raise a `LockUnavailable` exception.
     :param int max_retries: Maximum number of times to retry to acquire the
-        lock before raising a :exception:`LockUnavailable` exception. When set
-        to 0 (default), will always retry. Has essentially no effect if `wait`
-        is 0.
-    :raises: :exception:`LockUnavailable` when a lock with the same ID already
-        exists and `wait` is set to 0.
+        lock before raising a `LockUnavailable` exception. When set to 0
+        (default), will always retry. Has essentially no effect if ``wait`` is
+        0.
+    :raises LockUnavailable: when a lock with the same ID already exists and
+        ``wait`` is set to 0.
     """
     assert isinstance(lock_id, str) or isinstance(lock_id, bytes)
     if (not isinstance(wait, int)) or wait < 0:

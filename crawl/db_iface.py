@@ -1,4 +1,5 @@
 # *-* coding: utf-8 *-*
+"""Database interface for dbling."""
 
 import logging
 from time import sleep
@@ -12,12 +13,12 @@ from common.chrome_db import DB_ENGINE, extension, id_list
 from common.util import MunchyMunch, dict_to_dt
 from crawl.celery import app
 
-__all__ = ['add_new_crx_to_db', 'db_download_complete', 'db_extract_complete', 'db_profile_complete',
-           'DuplicateDownload', 'SqlAlchemyTask', 'READ_ONLY', 'DbActionFailed']
+__all__ = ['READ_ONLY', 'DuplicateDownload', 'SqlAlchemyTask', 'DbActionFailed',
+           'add_new_crx_to_db', 'db_download_complete', 'db_extract_complete', 'db_profile_complete']
 
 DB_SESSION = scoped_session(sessionmaker(autocommit=False, autoflush=False, bind=DB_ENGINE))
 MAX_EXECUTE_RETRIES = 20
-READ_ONLY = False
+READ_ONLY = False  #: Determines if database transactions are actually committed or rolled back
 
 
 class DuplicateDownload(Exception):
@@ -50,7 +51,7 @@ def add_new_crx_to_db(crx_obj, log_progress=False):
     If the CRX is already in the list of IDs, no changes are made to the DB.
 
     :param crx_obj: All current information about the CRX, which must include
-        at least the `id`.
+        at least the ``id``.
     :type crx_obj: dict
     :param log_progress: Whether to log this action. Typically only set to True
         when testing, and then only for every 1K entries or so.
@@ -80,13 +81,13 @@ def db_download_complete(crx_obj, log_progress=False):
     raise a :class:`DuplicateDownload` exception.
 
     :param crx_obj: All current information about the CRX, which must include
-        values for `id`, `version`, `dt_avail`, and `dt_downloaded`.
+        values for ``id``, ``version``, ``dt_avail``, and ``dt_downloaded``.
     :type crx_obj: munch.Munch
     :param log_progress: Whether to log this action at DEBUG (False) or INFO
         (True) level.
     :type log_progress: bool
     :rtype: None
-    :raises: :exception:`DbActionFailed` When updating the DB with download
+    :raises DbActionFailed: When updating the DB with download
         information fails.
     """
     db_session = DB_SESSION()
@@ -125,17 +126,17 @@ def db_download_complete(crx_obj, log_progress=False):
 def db_extract_complete(crx_obj, log_progress=False):
     """Update the database with information on the extracted extension.
 
-    The columns whose values are updated are `name`, `m_version`, and
-    `extracted`.
+    The columns whose values are updated are ``name``, ``m_version``, and
+    ``extracted``.
 
     :param crx_obj: All current information about the CRX, which must include
-        values for `id`, `version`, `dt_avail`, and `dt_extracted`.
+        values for ``id``, ``version``, ``dt_avail``, and ``dt_extracted``.
     :type crx_obj: munch.Munch
     :param log_progress: Whether to log this action at DEBUG (False) or INFO
         (True) level.
     :type log_progress: bool
     :rtype: None
-    :raises: :exception:`DbActionFailed` When updating the DB with extraction
+    :raises DbActionFailed: When updating the DB with extraction
         information fails.
     """
     db_session = DB_SESSION()
@@ -156,19 +157,19 @@ def db_extract_complete(crx_obj, log_progress=False):
 def db_profile_complete(crx_obj, log_progress=False, update_dt_avail=True):
     """Update DB that profiling is now complete, including centroid data.
 
-    The value of `update_dt_avail` should only be set to False when
+    The value of ``update_dt_avail`` should only be set to False when
     re-profiling the extensions in the database. Currently, the only known
     reason for re-profiling is the development of a new formula for calculating
-    centroids. In this case, the `last_known_available` column in the database
+    centroids. In this case, the ``last_known_available`` column in the database
     should NOT be updated.
 
-    Adds the following keys to `crx_obj.cent_dict`:
+    Adds the following keys to ``crx_obj.cent_dict``:
 
-    - `ext_id`: Corresponds to `crx_obj.id`.
-    - `version`:  Corresponds to `crx_obj.version`.
-    - `last_known_available`:  Corresponds to `crx_obj.dt_avail`. (Only added
-      if the `update_dt_avail` parameter is True.)
-    - `profiled`:  Corresponds to `crx_obj.dt_profiled`.
+    - ``ext_id``: Corresponds to ``crx_obj.id``.
+    - ``version``:  Corresponds to ``crx_obj.version``.
+    - ``last_known_available``:  Corresponds to ``crx_obj.dt_avail``. (Only added
+      if the ``update_dt_avail`` parameter is True.)
+    - ``profiled``:  Corresponds to ``crx_obj.dt_profiled``.
 
     :param crx_obj: Previously collected information about the extension.
     :type crx_obj: munch.Munch
@@ -177,7 +178,7 @@ def db_profile_complete(crx_obj, log_progress=False, update_dt_avail=True):
     :type log_progress: bool
     :param update_dt_avail: If re-profiling, this should be set to True.
     :type update_dt_avail: bool
-    :return: Updated version of `crx_obj`.
+    :return: Updated version of ``crx_obj``.
     :rtype: munch.Munch
     """
     db_session = DB_SESSION()

@@ -1,4 +1,5 @@
 # *-* coding: utf-8 *-*
+"""Data type and helper functions for graphs used by dbling."""
 
 import os
 import re
@@ -14,8 +15,22 @@ from common.util import separate_mode_type, byte_len
 
 
 class DblingGraph(gt.Graph):
+    """A digraph customized to store filesystem metadata for centroids.
+
+    Since this is inherits from :class:`graph_tool.Graph`, many of its methods
+    are documented in full by that class.
+    """
 
     def __init__(self, extended_attrs=False, g=None, **kwargs):
+        """
+        :param bool extended_attrs: When `True`, the
+            :meth:`~DblingGraph.init_extended_attrs` method is called, giving
+            the graph object additional vertex properties.
+        :param graph_tool.Graph g: Optional graph object to copy from. The
+            resulting `DblingGraph` object will be identical to the given graph.
+        :param kwargs: Any keyword arguments to be passed to
+            :class:`~graph_tool.Graph`'s constructor.
+        """
         super().__init__(g=g, **kwargs)
 
         if g is None:
@@ -51,6 +66,7 @@ class DblingGraph(gt.Graph):
                 self.init_extended_attrs()
 
     def init_extended_attrs(self):
+        """Set additional vertex properties for the graph object."""
         if not self.has_extended_attrs:  # Only do this once
             self.vp['alloc'] = self.new_vertex_property('bool')
             self.vp['used'] = self.new_vertex_property('bool')
@@ -63,12 +79,15 @@ class DblingGraph(gt.Graph):
             self.has_extended_attrs = True
 
     def copy(self):
+        """Return a copy of this graph instance."""
         return DblingGraph(g=self)
 
     def save(self, *args, **kwargs):
+        """Save the graph. See :meth:`graph_tool.Graph.save`."""
         super().save(*args, **kwargs)
 
     def load(self, *args, **kwargs):
+        """Load a graph. See :meth:`graph_tool.Graph.load`."""
         super().save(*args, **kwargs)
 
 
@@ -118,12 +137,13 @@ def set_vertex_props(digraph, vertex, filename, slice_path=False):
     hash of the file's full, normalized path.
 
     :param DblingGraph digraph: The graph the vertex belongs to.
-    :param vertex: The vertex object that will correspond with the file.
-    :type vertex: graph_tool.all.Vertex
+    :param graph_tool.all.Vertex vertex: The vertex object that will correspond
+        with the file.
     :param str filename: The path to the file.
-    :param bool slice_path: When set, filename will be run through the SLICE_PAT
-        before determining its depth. Can't remember what the advantage of
-        this is though...
+    :param bool slice_path: When set, filename will be run through the
+        `SLICE_PAT` before determining its depth. When the disk image being
+        traversed is mounted to another filesystem, this prevents the path of
+        the image's mount point from being included in the depth calculation.
     :return: SHA256 hash of the file's full, normalized path. (hex digest)
     :rtype: str
     """
@@ -180,12 +200,11 @@ def get_dir_depth(filename, slice_path=False):
     """
     Calculate how many directories deep the filename is.
 
-    :param filename: The path to be split and counted.
-    :type filename: str
-    :param slice_path: When set, filename will be run through the SLICE_PAT
-        before determining its depth. Can't remember what the advantage of
-        this is though...
-    :type slice_path: bool
+    :param str filename: The path to be split and counted.
+    :param bool slice_path: When set, filename will be run through the
+        `SLICE_PAT` before determining its depth. When the disk image being
+        traversed is mounted to another filesystem, this prevents the path of
+        the image's mount point from being included in the depth calculation.
     :return: The number of directory levels in the filename.
     :rtype: int
     """

@@ -1,0 +1,191 @@
+{
+    "_meta": {
+        "hash": {
+            "sha256": "de0e549328989ef4f69849955ed5497354c753ad0252b1f99b695e32a5940bc1"
+        },
+        "requires": {},
+        "sources": [
+            {
+                "url": "https://pypi.python.org/simple",
+                "verify_ssl": true
+            }
+        ]
+    },
+    "default": {
+        "aiodns": {
+            "version": "==1.1.1"
+        },
+        "amqp": {
+            "version": "==1.4.9"
+        },
+        "ansible": {
+            "version": "==2.3.1.0"
+        },
+        "anyjson": {
+            "version": "==0.3.3"
+        },
+        "asn1crypto": {
+            "version": "==0.22.0"
+        },
+        "bcrypt": {
+            "version": "==3.1.3"
+        },
+        "beautifulsoup4": {
+            "version": "==4.6.0"
+        },
+        "billiard": {
+            "version": "==3.3.0.23"
+        },
+        "celery": {
+            "version": "==3.1.24"
+        },
+        "certifi": {
+            "version": "==2017.4.17"
+        },
+        "cffi": {
+            "version": "==1.10.0"
+        },
+        "chardet": {
+            "version": "==3.0.4"
+        },
+        "colorama": {
+            "version": "==0.3.9"
+        },
+        "crx-unpack": {
+            "version": "==0.1.4"
+        },
+        "cryptography": {
+            "version": "==1.9"
+        },
+        "decorator": {
+            "version": "==4.0.11"
+        },
+        "docopt": {
+            "version": "==0.6.2"
+        },
+        "enum-compat": {
+            "version": "==0.0.2"
+        },
+        "eventlet": {
+            "version": "==0.21.0"
+        },
+        "google-api-python-client": {
+            "version": "==1.6.2"
+        },
+        "greenlet": {
+            "version": "==0.4.12"
+        },
+        "httplib2": {
+            "version": "==0.10.3"
+        },
+        "idna": {
+            "version": "==2.5"
+        },
+        "ipython-genutils": {
+            "version": "==0.2.0"
+        },
+        "jinja2": {
+            "version": "==2.9.6"
+        },
+        "jsonschema": {
+            "version": "==2.6.0"
+        },
+        "jupyter-core": {
+            "version": "==4.3.0"
+        },
+        "kombu": {
+            "version": "==3.0.37"
+        },
+        "lxml": {
+            "version": "==3.8.0"
+        },
+        "markupsafe": {
+            "version": "==1.0"
+        },
+        "munch": {
+            "version": "==2.1.1"
+        },
+        "nbformat": {
+            "version": "==4.3.0"
+        },
+        "oauth2client": {
+            "version": "==4.1.1"
+        },
+        "olefile": {
+            "version": "==0.44"
+        },
+        "paramiko": {
+            "version": "==2.2.1"
+        },
+        "pillow": {
+            "version": "==4.1.1"
+        },
+        "plotly": {
+            "version": "==2.0.10"
+        },
+        "progressbar2": {
+            "version": "==3.30.2"
+        },
+        "pyasn1": {
+            "version": "==0.2.3"
+        },
+        "pyasn1-modules": {
+            "version": "==0.0.9"
+        },
+        "pycares": {
+            "version": "==2.1.1"
+        },
+        "pycparser": {
+            "version": "==2.17"
+        },
+        "pycrypto": {
+            "version": "==2.6.1"
+        },
+        "pymemcache": {
+            "version": "==1.4.3"
+        },
+        "pynacl": {
+            "version": "==1.1.2"
+        },
+        "python-utils": {
+            "version": "==2.1.0"
+        },
+        "pytz": {
+            "version": "==2017.2"
+        },
+        "pyuefi": {
+            "version": "==0.1"
+        },
+        "pyyaml": {
+            "version": "==3.12"
+        },
+        "requests": {
+            "version": "==2.18.1"
+        },
+        "rsa": {
+            "version": "==3.4.2"
+        },
+        "setuptools": {
+            "version": "==36.0.1"
+        },
+        "six": {
+            "version": "==1.10.0"
+        },
+        "sqlalchemy": {
+            "version": "==1.1.11"
+        },
+        "traitlets": {
+            "version": "==4.3.2"
+        },
+        "uritemplate": {
+            "version": "==3.0.0"
+        },
+        "urllib3": {
+            "version": "==1.21.1"
+        },
+        "uvloop": {
+            "version": "==0.8.0"
+        }
+    },
+    "develop": {}
+}

@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
 # *-* coding: utf-8 *-*
+"""Create Matching Extension Ranking List files.
+
+The full method used by this module is described in the `paper on dbling
+<http://www.sciencedirect.com/science/article/pii/S174228761630038X>`_.
+
+The MERL schema is available at https://github.com/mmabey/merl_schema.
+"""
+
 import atexit
 import logging
 import os
@@ -15,6 +23,8 @@ from common.centroid import CentroidCalc, get_normalizing_vector, centroid_diffe
     DB_META, get_tree_top
 
 
+#: The header for all new MERL files. This includes all references to XML namespaces necessary for validating the XML
+#: file's contents.
 STARTER = """<?xml version="1.0" encoding="UTF-8"?>
 <merl
     xmlns="https://mikemabey.com/schema/merl"
@@ -31,7 +41,26 @@ MAX_CANDIDATE_TAGS = 5
 
 
 class Merl:
+    """Create MERL files for a list of candidate graphs.
+
+    The typical use case for this class is for it to be instantiated, then
+    passed a number of candidate graphs (using the
+    :meth:`~Merl.match_candidates` method) that should be matched with potential
+    extensions based on their centroids in the database. Finally, the
+    :meth:`~Merl.save_merl` method should be called so the contents of the MERL
+    file will be written to disk.
+    """
+
     def __init__(self, *, src_image_filename=None, src_mount_point=None, out_fp=None, plain_output=False):
+        """
+        :param str src_image_filename: The filename of the disk image that was
+            scanned to find candidates.
+        :param str src_mount_point:
+        :param out_fp: File handle to the output file where the MERL file will
+            be saved. Should already be opened.
+        :param bool plain_output: When `True`, will not format the output as
+            XML, but in a more human-readable format.
+        """
         self._soup = BeautifulSoup(STARTER, 'xml')
         self._top = self._soup.merl
 
@@ -57,10 +86,12 @@ class Merl:
 
     @property
     def merl(self):
+        """The contents of the MERL file."""
         return self._soup.prettify()
 
     @property
     def output_file(self):
+        """Destination of the MERL when saved."""
         return self._out_file
 
     @output_file.setter
@@ -69,6 +100,7 @@ class Merl:
             self._out_file = stream
 
     def save_merl(self):
+        """Write the MERL file to disk."""
         self.output_file.write(self.merl)
         print(self.merl, file=self.output_file)
 
@@ -78,8 +110,9 @@ class Merl:
     def match_candidates(self, candidates_list):
         """Iterate through the list of candidates and find matches.
 
-        :param list candidates_list: List of graphs that are candidates for
-            being extensions installed on the device.
+        :param candidates_list: List of graphs that are candidates for being
+            extensions installed on the device.
+        :type candidates_list: list(DblingGraph)
         :rtype: None
         """
         n = 0
@@ -97,8 +130,9 @@ class Merl:
         :param DblingGraph candidate: A graph that is a candidate for being an
             extension installed on the device.
         :param int match_num: Number indicating which number of candidate this
-            is in a set of candidates. Note that this number is not an index,
-            since numbering begins at 1.
+            is in a set of candidates. This value has no effect when
+            ``self.plain_output`` is `False`. Note that this number is not an
+            index, since numbering begins at 1.
         :rtype: None
         """
         # Iterate through the centroid families table, and get the centroid for the family
@@ -256,10 +290,10 @@ class Merl:
         )
 
     def tag(self, tag_name, *args):
-        """Create a new tag and add everything from `args` as its contents.
+        """Create a new tag and add everything from ``args`` as its contents.
 
         :param str tag_name: Name of the new tag.
-        :param args: All parameters after `tag_name` will be appended to the
+        :param args: All parameters after ``tag_name`` will be appended to the
             contents of the new tag.
         :return: The new tag.
         :rtype: bs4.Tag
@@ -274,10 +308,32 @@ class Merl:
 
 
 def calc_confidence(distance, fam_size, delta=3):
+    """Return the confidence level given the parameters.
+
+    For an explanation on what this is doing, see the `paper on dbling
+    <http://www.sciencedirect.com/science/article/pii/S174228761630038X>`_.
+
+    :param distance: The distance between the candidate graph's centroid and
+        an extension's centroid.
+    :type distance: int or float
+    :param int fam_size: The number of other extensions that have this exact
+        same centroid. In the formula from the paper, this is ``n``.
+    :param delta: A weight for adjusting the rate at which the confidence
+        drops as the distance between a candidate graph and an extension's
+        centroid increases. This is ``δ`` in the paper.
+    :type delta: int or float
+    :return: Confidence level, where 1 is 100% confident.
+    :rtype: float
+    """
     return (e ** (-1 * delta * distance)) / fam_size
 
 
 def get_username():
+    """Return the OS username of the current user.
+
+    :return: Username if available or ``UNKNOWN`` if not able to determine
+    :rtype: str
+    """
     try:
         return os.getlogin()
     except FileNotFoundError:

@@ -15,20 +15,20 @@ ECRYPTFS_FNEK_ENCRYPTED.FWbQ51sP41qdiUSCJoXGskhYOFgAgSH66reIZ1hX0TzA7UVGpAWWaNy5
 It has the following components:
 
 | Name           | Length | Description |
-| -------------- | :----: | ----------- |
-| Prefix         |     24 | `ECRYPTFS_FNEK_ENCRYPTED.` |
+| -------------- | -----: | ----------- |
+| Prefix         |     24 | `ECRYPTFS_FNEK_ENCRYPTED.` (includes the period) |
 | Packet Type    |      1 | Should always be `F`, which is 70 in decimal, 0x46 in hex |
-| Packet Length  |    1-2 | Depends on ... |
-| FNEK Signature |      8 | blah...
+| Packet Length  |    1-2 | Depends on (?) |
+| FNEK Signature |      8 |
 | Cipher code    |      1 | Number indicating the cipher used to encrypt the filename |
-| l
-| Filename       |   n*20 | Encrypted and encoded |
+| ...
+| Filename       |   n\*20 | Encrypted and encoded |
 
 
 The prefix is prepended to all filenames when both of the following are true (1) the option to encrypt filenames is on,
 and (2) the same key isn't used to encrypt both the file contents and the filename.
-For Chrome OS, this will always be the case 
-       since it always uses different keys for this.
+
+For Chrome OS, this will always be the case since it always uses different keys for this.
 
 `ECRYPTFS_FILENAME_MIN_RANDOM_PREPEND_BYTES`, defined to be 16
 

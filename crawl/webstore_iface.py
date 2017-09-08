@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # *-* coding: utf-8 *-*
+"""Chrome Web Store interface for dbling."""
 
 import asyncio
 import logging
@@ -51,19 +52,32 @@ class VersionExtractError(Exception):
 
 
 class DownloadCRXList:
+    """Generate list of extension IDs downloaded from Google.
+
+    As a generator, this is designed to be used in a ``for`` loop. For example:
+
+    >>> crx_list = DownloadCRXList(download_url)
+    >>> for crx_id in crx_list:
+    ...     print(crx_id)
+
+    The list of CRXs will be downloaded just prior to when the first item is
+    generated. In other words, instantiating this class doesn't start the
+    download, iterating over the instance starts the download. This is
+    significant given that downloading the list is quite time consuming.
+    """
+
     # Namespace tag used by the downloaded list (XML file)
     _ns = '{http://www.sitemaps.org/schemas/sitemap/0.9}'
     list_list_url = 'https://chrome.google.com/webstore/sitemap'
 
     def __init__(self, ext_url, *, return_count=False, session=None):
-        """Generate list of extension IDs downloaded from Google.
-
+        """
         :param str ext_url: Specially crafted URL that will let us download the
             list of extensions.
         :param bool return_count: When True, will return a tuple of the form:
-            `(crx_id, job_number)`, where `job_number` is the index of the ID
-            plus 1. This way, the job number of the last ID returned will be
-            the same as `len(DownloadCRXList)`.
+            ``(crx_id, job_number)``, where ``job_number`` is the index of the
+            ID plus 1. This way, the job number of the last ID returned will be
+            the same as ``len(DownloadCRXList)``.
         :param requests.Session session: Session object to use when downloading
             the list. If None, a new :class:`requests.Session` object is
             created.
@@ -98,7 +112,7 @@ class DownloadCRXList:
         This function actually creates an event loop and starts the downloads
         asynchronously.
 
-        :return:
+        :rtype: None
         """
         loop = asyncio.get_event_loop_policy().new_event_loop()
         with TemporaryDirectory() as self.sitemap_dir:
@@ -210,32 +224,32 @@ class DownloadCRXList:
 
 
 def save_crx(crx_obj, download_url, save_path=None, session=None):
-    """Download the CRX, save in the `save_path` directory.
+    """Download the CRX, save in the ``save_path`` directory.
 
-    The saved file will have the format: `<extension ID>_<version>.crx`
+    The saved file will have the format: ``<extension ID>_<version>.crx``
 
-    If `save_path` isn't given, this will default to a directory called
+    If ``save_path`` isn't given, this will default to a directory called
     "downloads" in the CWD.
 
-    Adds the following keys to `crx_obj`:
+    Adds the following keys to ``crx_obj``:
 
-    - `version`: Version number of the extension, as obtained from the final
+    - ``version``: Version number of the extension, as obtained from the final
       URL of the download. This may differ from the version listed in the
       extension's manifest.
-    - `filename`: The basename of the CRX file (not the full path)
-    - `full_path`: The location (full path) of the downloaded CRX file
+    - ``filename``: The basename of the CRX file (not the full path)
+    - ``full_path``: The location (full path) of the downloaded CRX file
 
     :param crx_obj: Previously collected information about the extension.
     :type crx_obj: munch.Munch
     :param download_url: The URL template that already contains the correct
-        Chrome version information and '{}' where the ID goes.
+        Chrome version information and ``{}`` where the ID goes.
     :type download_url: str
     :param save_path: Directory where the CRX should be saved.
-    :type save_path: str|None
-    :param session: Optional `Session` object to use for HTTP requests.
-    :type session: None|requests.Session
-    :return: Updated version of `crx_obj` with `version`, `filename`, and
-        `full_path` information added. If the download wasn't successful, not
+    :type save_path: str or None
+    :param session: Optional :class:`~requests.Session` object to use for HTTP requests.
+    :type session: requests.Session or None
+    :return: Updated version of ``crx_obj`` with ``version``, ``filename``, and
+        ``full_path`` information added. If the download wasn't successful, not
         all of these may have been added, depending on when it failed.
     :rtype: munch.Munch
     """
@@ -325,15 +339,16 @@ def _http_get(url, session=None, stream=True, **kwargs):
 
     :param url: The URL to GET.
     :type url: str
-    :param session: Optional `Session` object to use to make the GET request.
-    :type session: None|requests.Session
+    :param session: Optional :class:`~requests.Session` object to use to make
+        the GET request.
+    :type session: requests.Session or None
     :param stream: If `False`, the response content will be immediately
         downloaded.
     :type stream: bool
-    :param kwargs: Optional arguments that `request` takes.
+    :param kwargs: Optional arguments that :func:`requests.get` takes.
     :type kwargs: dict
-    :return: The `Response` object containing the server's response to the
-        HTTP request.
+    :return: The :class:`~requests.Response` object containing the server's
+        response to the HTTP request.
     :rtype: requests.Response
     """
     if isinstance(session, requests.Session):

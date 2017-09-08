@@ -46,25 +46,25 @@ TEST_LIMIT = float('inf')  # 5000  # Set to float('inf') when not testing
 def start_list_download():
     """Download list of current CRXs from Google, start profiling each one.
 
-    Initiated by a Celery "beat" configuration in `crawl.celery_config`.
+    Initiated by a Celery "beat" configuration in :mod:`crawl.celery_config`.
 
     Uses a Celery chord to initiate processing all of the CRXs with a single
-    callback task (`summarize_job`) that summarizes all the work done in an
-    email sent to the admins listed in `crawl.celery_config`.
+    callback task (:func:`summarize_job`) that summarizes all the work done in
+    an email sent to the admins listed in :mod:`crawl.celery_config`.
 
-    Adds the following keys to `crx_obj`:
+    Adds the following keys to ``crx_obj``:
 
-    - `id`: The 32 character ID of the extension.
-    - `dt_avail`: Date and time the list is downloaded.
-    - `msgs`: Array of progress messages. These strings are what are compiled
-      by `summarize_job` to report on the work done.
-    - `job_num`: Index within the current crawl. Although we don't have any
+    - ``id``: The 32 character ID of the extension.
+    - ``dt_avail``: Date and time the list is downloaded.
+    - ``msgs``: Array of progress messages. These strings are what are compiled
+      by :func:`summarize_job` to report on the work done.
+    - ``job_num``: Index within the current crawl. Although we don't have any
       guarantee that the extensions will be profiled precisely in order, this
       gives tasks processing an extension some idea of how far along in the
       crawl things are. This allows us to do subjective logging (log progress
       only if the job number % 1000 == 0) at higher levels to keep any watching
       users apprised of progress without too many log entries.
-    - `job_ttl`: Total number of CRXs that will be processed; equal to the
+    - ``job_ttl``: Total number of CRXs that will be processed; equal to the
       number of IDs in the downloaded list of extensions.
     """
 
@@ -122,24 +122,24 @@ def make_crx_obj(id_, dt_avail, job_num, job_ttl):
 def start_redo_extract_profile():
     """Start re-profiling process on the CRXs already downloaded.
 
-    Adds the following keys to `crx_obj` (from `crxs_on_disk`):
+    Adds the following keys to ``crx_obj`` (from :func:`crxs_on_disk`):
 
-    - `id`: The 32 character ID of the extension.
-    - `version`: Version number of the extension, as obtained from the final
+    - ``id``: The 32 character ID of the extension.
+    - ``version``: Version number of the extension, as obtained from the final
       URL of the download. This may differ from the version listed in the
       extension's manifest.
-    - `msgs`: Array of progress messages. These strings are what are compiled
-      by `summarize_job` to report on the work done.
-    - `job_num`: Index within the current crawl. Although we don't have any
+    - ``msgs``: Array of progress messages. These strings are what are compiled
+      by :func:`summarize_job` to report on the work done.
+    - ``job_num``: Index within the current crawl. Although we don't have any
       guarantee that the extensions will be profiled precisely in order, this
       gives tasks processing an extension some idea of how far along in the
       crawl things are. This allows us to do subjective logging (log progress
       only if the job number % 1000 == 0) at higher levels to keep any watching
       users apprised of progress without too many log entries.
-    - `job_ttl`: Total number of CRXs that will be processed; equal to the
+    - ``job_ttl``: Total number of CRXs that will be processed; equal to the
       number of IDs in the downloaded list of extensions.
-    - `filename`: The basename of the CRX file (not the full path)
-    - `full_path`: The location (full path) of the downloaded CRX file
+    - ``filename``: The basename of the CRX file (not the full path)
+    - ``full_path``: The location (full path) of the downloaded CRX file
     """
     # Using the `crxs_on_disk` generator, send all the CRXs to be queued, then summarize the results
     logging.info('Beginning re-profiling process of all CRXs already downloaded.')
@@ -171,24 +171,24 @@ def process_crx(crx_obj):
 
     We use a temporary directory for extracting extensions for two reasons.
     First, using a real directory greatly increases the file operations that
-    have to occur via `sshfs`, which slows things down and increases the I/O
-    burden on `dbling-master`. A temp directory keeps the files local to the
+    have to occur via ``sshfs``, which slows things down and increases the I/O
+    burden on ``dbling-master``. A temp directory keeps the files local to the
     worker machine and avoids this issue.
 
     Second, there aren't any very good reasons for keeping three versions of
-    every extension. Prior to incorporating the :module:`tempfile` module, we
+    every extension. Prior to incorporating the :mod:`tempfile` module, we
     were saving the CRX, the zip version (which is just the CRX without the
     headers), and the extracted zip. Eliminating the latter two versions
     reduces the size of the data set.
 
-    Adds the following keys to `crx_obj`:
+    Adds the following keys to ``crx_obj``:
 
-    - `extracted_path`: Temporary dir where the extension's files will be
+    - ``extracted_path``: Temporary dir where the extension's files will be
       unpacked.
-    - `enc_extracted_path`: Encrypted temporary dir that eCryptfs will mount
-      to the `extracted_path`. This is the directory that will be used for
+    - ``enc_extracted_path``: Encrypted temporary dir that eCryptfs will mount
+      to the ``extracted_path``. This is the directory that will be used for
       profiling the extension.
-    - `stop_processing`: Flag indicating an error during processing.
+    - ``stop_processing``: Flag indicating an error during processing.
 
     :param crx_obj: Details of a single CRX, which gets updated at every step.
     :type crx_obj: Munch
@@ -226,14 +226,14 @@ def redo_extract_profile(crx_obj):
     Functions very similarly to the :func:`process_crx` task, so it may be
     helpful to refer to its documentation.
 
-    Adds the following keys to `crx_obj`:
+    Adds the following keys to ``crx_obj``:
 
-    - `extracted_path`: Temporary dir where the extension's files will be
+    - ``extracted_path``: Temporary dir where the extension's files will be
       unpacked.
-    - `enc_extracted_path`: Encrypted temporary dir that eCryptfs will mount
-      to the `extracted_path`. This is the directory that will be used for
+    - ``enc_extracted_path``: Encrypted temporary dir that eCryptfs will mount
+      to the ``extracted_path``. This is the directory that will be used for
       profiling the extension.
-    - `stop_processing`: Flag indicating an error during processing.
+    - ``stop_processing``: Flag indicating an error during processing.
 
     :param crx_obj: Details of a single CRX, which gets updated at every step.
     :type crx_obj: Munch
@@ -273,22 +273,23 @@ def redo_extract_profile(crx_obj):
 def download_crx(crx_obj):
     """Download and save the CRX, processes any errors.
 
-    Adds the following keys to `crx_obj`:
+    Adds the following keys to ``crx_obj``:
 
-    - `dt_downloaded`: Date and time when the CRX was downloaded.
-    - `version`: Version number of the extension. Typically set in `save_crx`.
-      Only set here if a duplicate download was detected by
-      `db_download_complete`.
-    - `filename`: Base name of the CRX, in format <id>_<version>.crx (set in
+    - ``dt_downloaded``: Date and time when the CRX was downloaded.
+    - ``version``: Version number of the extension. Typically set in
+      :func:`webstore_iface.save_crx`. Only set here if a duplicate download
+      was detected by :func:`db_iface.db_download_complete`.
+    - ``filename``: Base name of the CRX, in format <id>_<version>.crx (set in
       :func:`save_crx`).
-    - `full_path`: Location of CRX. Typically set in `save_crx`. Only set here
-      if a duplicate download was detected by `db_download_complete`.
+    - ``full_path``: Location of CRX. Typically set in :func:`save_crx`. Only
+      set here if a duplicate download was detected by
+      :func:`db_iface.db_download_complete`.
 
-    This calls :ref:`crawl.webstore_iface.save_crx` which also adds keys.
+    This calls :func:`crawl.webstore_iface.save_crx` which also adds keys.
 
     :param crx_obj: Previously collected information about the extension.
     :type crx_obj: munch.Munch
-    :return: Updated version of `crx_obj`.
+    :return: Updated version of ``crx_obj``.
     :rtype: munch.Munch
     """
     logging.debug('{} [{}/{}]  Starting download of CRX'.format(crx_obj.id, crx_obj.job_num, crx_obj.job_ttl))
@@ -375,19 +376,19 @@ def download_crx(crx_obj):
 def extract_crx(crx_obj, **kwargs):
     """Unpack (extract) the CRX, process any errors.
 
-    Adds the following key to `crx_obj`:
+    Adds the following key to ``crx_obj``:
 
-    - `dt_extracted`: Date and time the extraction was completed.
+    - ``dt_extracted``: Date and time the extraction was completed.
 
-    Also calls :function:`read_manifest`, which adds the following keys to
-    `crx_obj`:
+    Also calls :func:`read_manifest`, which adds the following keys to
+    ``crx_obj``:
 
-    - `name`: Name of the extension as specified in the manifest.
-    - `m_version`: Version of the extension as specified in the manifest.
+    - ``name``: Name of the extension as specified in the manifest.
+    - ``m_version``: Version of the extension as specified in the manifest.
 
     :param munch.Munch crx_obj: Previously collected information about the
         extension.
-    :return: Updated version of `crx_obj`.
+    :return: Updated version of ``crx_obj``.
     :rtype: munch.Munch
     """
 
@@ -456,14 +457,14 @@ def read_manifest(crx_obj):
     For manifest file format info, see
     https://developer.chrome.com/extensions/manifest
 
-    Adds the following keys to `crx_obj`:
+    Adds the following keys to ``crx_obj``:
 
-    - `name`: Name of the extension as specified in the manifest.
-    - `m_version`: Version of the extension as specified in the manifest.
+    - ``name``: Name of the extension as specified in the manifest.
+    - ``m_version``: Version of the extension as specified in the manifest.
 
     :param munch.Munch crx_obj: Previously collected information about the
         extension.
-    :return: Updated version of `crx_obj`.
+    :return: Updated version of ``crx_obj``.
     :rtype: munch.Munch
     """
     # Open manifest file from extracted dir and get name and version of the extension
@@ -495,29 +496,31 @@ def read_manifest(crx_obj):
 def profile_crx(crx_obj, re_profiling=False):
     """Calculate a profile (centroid) using the extension's extracted files.
 
-    Adds the following keys to `crx_obj`:
+    Adds the following keys to ``crx_obj``:
 
-    - `dt_profiled`
-    - `cent_dict`: Centroid values in a dictionary with keys that correspond to
-      columns in the `extension` table in the DB. Later, this dict is used to
-      store all values that will be inserted into the DB. See
-      :ref:`db_profile_complete` for more information. Centroid keys include:
+    - ``dt_profiled``
+    - ``cent_dict``: Centroid values in a dictionary with keys that correspond
+      to columns in the ``extension`` table in the DB. Later, this dict is used
+      to store all values that will be inserted into the DB. See
+      :func:`db_iface.db_profile_complete` for more information. Centroid keys
+      include:
 
-      - `num_dirs`
-      - `num_files`
-      - `perms`
-      - `depth`
-      - `type`
-      - `size`
+      - ``num_dirs``
+      - ``num_files``
+      - ``perms``
+      - ``depth``
+      - ``type``
+      - ``size``
 
-    This calls :ref:`db_profile_complete` which also adds keys to `cent_dict`.
+    This calls :func:`db_iface.db_profile_complete` which also adds keys to
+    ``cent_dict``.
 
     :param munch.Munch crx_obj: Previously collected information about the
         extension.
     :param bool re_profiling: Set when we're re-profiling downloaded
         extensions. This keeps the database interface from attempting to update
-        the `dt_avail` field.
-    :return: Updated version of `crx_obj`.
+        the ``dt_avail`` field.
+    :return: Updated version of ``crx_obj``.
     :rtype: munch.Munch
     """
     # Generate graph from directory and centroid from the graph
@@ -570,12 +573,12 @@ def summarize(self, jobs, *, job_id, chunk_num, ttl_chunks):
     Also logs the information at the WARNING level.
 
     :param self: Because this is a "bound" function, it will have access to
-        additional methods via the `self` parameter. Not sure what type it is.
-    :param list jobs: List of messages. Should be from `crx_obj.msgs`.
+        additional methods via the ``self`` parameter. Not sure what type it is.
+    :param list jobs: List of messages. Should be from ``crx_obj.msgs``.
     :param str job_id: ID for the set of job chunks. Should be the timestamp
-        with the format given in `JOB_ID_FMT`.
+        with the format given in :data:`JOB_ID_FMT`.
     :param int chunk_num: Which chunk this set of results corresponds to. Must
-        be in the range 0 to `ttl_chunks`-1.
+        be in the range 0 to ``ttl_chunks``-1.
     :param int ttl_chunks: Total number of chunks in this job. It is critical
         to how this function works that this number be accurate.
     :rtype: None
@@ -641,22 +644,22 @@ def summarize(self, jobs, *, job_id, chunk_num, ttl_chunks):
 
 
 def crxs_on_disk(crx_dir=_conf.save_path, limit=float('inf')):
-    """Generate crx_obj dicts for CRXs already downloaded to `crx_dir`.
+    """Generate crx_obj dicts for CRXs already downloaded to ``crx_dir``.
 
     :param str crx_dir: Directory where the CRXs are saved when downloaded.
     :param limit: When testing, this can be set to a number, and only that
         many CRXs will be returned. If the value of limit is a `float` instead
-        of an `int` it should be infinity (e.g. `float('inf')`).
+        of an `int` it should be infinity (e.g. ``float('inf')``).
     :type limit: int or float
     :return: Dict with the following keys:
 
-        - `id`
-        - `version`
-        - `msgs`
-        - `job_num`
-        - `job_ttl`
-        - `filename`
-        - `full_path`
+        - ``id``
+        - ``version``
+        - ``msgs``
+        - ``job_num``
+        - ``job_ttl``
+        - ``filename``
+        - ``full_path``
     :rtype: dict
     """
     ttl = ttl_files_in_dir(crx_dir, pat='crx')
