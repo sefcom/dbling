@@ -5,7 +5,13 @@
 dbling: The Chrome OS Forensic Tool
 ===================================
 
-dbling is a tool for performing forensics in Chrome OS. More info will be forthcoming.
+|docs| |python_versions| |license_type|
+
+dbling is a tool for performing forensics in Chrome OS. This work is based on the following publication:
+
+- Mike Mabey, Adam Doupé, Ziming Zhao, and Gail-Joon Ahn. "dbling: Identifying Extensions Installed on
+  Encrypted Web Thin Clients". In: *Digital Investigation* (2016). The Proceedings of the Sixteenth Annual
+  DFRWS Conference. URL: http://www.sciencedirect.com/science/article/pii/S174228761630038X
 
 
 Installation
@@ -77,3 +83,20 @@ dbling is licensed under the `MIT License <https://github.com/sefcom/dbling/blob
    api
    secret
    google_api
+
+
+.. |docs| image:: https://readthedocs.org/projects/crx-unpack/badge/
+    :alt: Documentation Status
+    :target: `Read the Docs`_
+
+.. |python_versions| image:: https://img.shields.io/badge/python-3.5%2C%203.6-blue.svg
+    :alt: Python versions supported
+    :target: `GitHub`_
+
+.. |license_type| image:: https://img.shields.io/github/license/sefcom/dbling.svg
+    :alt: License: MIT
+    :target: `GitHub`_
+
+.. _Read the Docs: http://dbling.readthedocs.io/
+
+.. _GitHub: https://github.com/sefcom/dbling
