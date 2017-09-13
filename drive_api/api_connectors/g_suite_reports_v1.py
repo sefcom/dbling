@@ -1,9 +1,13 @@
-from apiclient import discovery
+# -*- coding: utf-8 -*-
 
+from api_connectors.google import GoogleAPI
 from util import print_json
 
 
-class GSuiteReportsAPI:
+class GSuiteReportsAPI(GoogleAPI):
+
+    _service_name = 'admin'
+    _version = 'reports_v1'
 
     def __init__(self, http):
         """
@@ -13,7 +17,7 @@ class GSuiteReportsAPI:
 
         :param http: http object
         """
-        self.service = discovery.build('admin', 'reports_v1', http=http)
+        super().__init__(http)
 
     def test(self):
         """

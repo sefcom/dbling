@@ -1,9 +1,13 @@
-from apiclient import discovery
+# -*- coding: utf-8 -*-
 
+from api_connectors.google import GoogleAPI
 from util import print_json
 
 
-class PeopleAPI:
+class PeopleAPI(GoogleAPI):
+
+    _service_name = 'people'
+    _version = 'v1'
 
     def __init__(self, http):
         """
@@ -11,7 +15,7 @@ class PeopleAPI:
 
         :param http: http object
         """
-        self.service = discovery.build('people', 'v1', http=http)
+        super().__init__(http)
 
     # TODO paging
     def get_contacts(self):

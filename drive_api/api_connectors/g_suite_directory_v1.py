@@ -1,9 +1,13 @@
-from apiclient import discovery
+# -*- coding: utf-8 -*-
 
+from api_connectors.google import GoogleAPI
 from util import print_json
 
 
-class GSuiteDirectoryAPI:
+class GSuiteDirectoryAPI(GoogleAPI):
+
+    _service_name = 'admin'
+    _version = 'directory_v1'
 
     def __init__(self, http):
         """
@@ -13,7 +17,7 @@ class GSuiteDirectoryAPI:
 
         :param http: http object
         """
-        self.service = discovery.build('admin', 'directory_v1', http=http)
+        super().__init__(http)
 
     def test(self):
         """

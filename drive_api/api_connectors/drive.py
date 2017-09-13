@@ -1,18 +1,25 @@
+# -*- coding: utf-8 -*-
 import io
 import os
 
 from apiclient import http as http_, discovery
 
-from env import DOWNLOAD_DIRECTORY, MIME
+from api_connectors.google import GoogleAPI
+from const import DOWNLOAD_DIRECTORY, MIME, PAGE_SIZE
 from util import print_json, convert_mime_type_and_extension
 
 
-class DriveAPI:
+class DriveAPI(GoogleAPI):
     """
     Class to interact with Google Drive APIs
 
-    https://developers.google.com/resources/api-libraries/documentation/drive/v3/python/latest/index.html
+    Documentation for the Python API:
+    - https://developers.google.com/resources/api-libraries/documentation/drive/v3/python/latest/index.html
     """
+
+    _service_name = 'drive'
+    _version = 'v3'
+
     def __init__(self, http):
         """
         Sets service object to make API calls to Google
@@ -22,8 +29,9 @@ class DriveAPI:
         :param http: http object
         :return DriveAPI Object
         """
+        super().__init__(http)
 
-        self.service = discovery.build('drive', 'v3', http=http)
+        self._team_drives = None
 
     def get_about(self, fields='*'):
         """
@@ -48,29 +56,142 @@ class DriveAPI:
 
             # Needs to loop over all changes using pageToken from start_token and nextPageToken token
 
-    # For time-line creation and acquiring user files this is not useful.
-    # This would be useful for an file syncing application
-    # paging needs fixing
-    def get_changes(self, fields='kind,comments'):
+    @property
+    def team_drives(self):
+        """A list of team drives associated with the user.
+
+        :rtype: list(str)
         """
-        Returns list of changes for a google drive account
+        if isinstance(self._team_drives, list):
+            return self._team_drives
+
+        # Populate list of team drives
+        self._team_drives = []
+        page_token = None
+        while True:
+            t = self.service.teamdrives().list(pageToken=page_token, pageSize=PAGE_SIZE).execute()
+            assert isinstance(t, dict)
+            page_token = t.get('nextPageToken')
+            self._team_drives += [x['id'] for x in t['teamDrives']]
+
+            # page_token will be None when there are no more pages of results
+            if page_token is None:
+                break
+
+    def get_changes(self, spaces='drive', include_team_drives=True, restrict_to_my_drive=False,
+                    include_corpus_removals=None, include_removed=None):
+        """Return the changes for a Google Drive account.
+
+        The set of changes as returned by this method are more suited for a
+        file syncing application.
+
+        In the returned :class:`dict`, the key for changes in the user's
+        regular Drive is an empty string (``''``). The data for each Team Drive
+        (assuming ``include_team_drives`` is `True`) is stored using a key in
+        the format ``'team_drive_X'``, where ``X`` is the ID of the Team Drive.
+        For the form of the JSON data, go to
+        https://developers.google.com/resources/api-libraries/documentation/drive/v3/python/latest/drive_v3.teamdrives.html#list
 
         https://developers.google.com/drive/v3/reference/changes
 
-        :param fields: fields to be returned
-        :type fields: string
-        :return: JSON
+        :param str spaces: A comma-separated list of spaces to query within the
+            user corpus. Supported values are 'drive', 'appDataFolder' and
+            'photos'.
+        :param bool include_team_drives: Whether or not to include
+        :param bool restrict_to_my_drive: Whether to restrict the results to
+            changes inside the My Drive hierarchy. This omits changes to files
+            such as those in the Application Data folder or shared files which
+            have not been added to My Drive.
+        :param bool include_corpus_removals: Whether changes should include the
+            file resource if the file is still accessible by the user at the
+            time of the request, even when a file was removed from the list of
+            changes and there will be no further change entries for this file.
+        :param bool include_removed: Whether to include changes indicating that
+            items have been removed from the list of changes, for example by
+            deletion or loss of access.
+        :return: All data on changes by the user in JSON format and stored in
+            a :class:`dict`.
+        :rtype: dict(str, dict)
+        """
+        args = {
+            'spaces': spaces,
+            'restrict_to_my_drive': restrict_to_my_drive,
+            'include_corpus_removals': include_corpus_removals,
+            'include_removed': include_removed,
+        }
+
+        # Get changes for regular Drive stuff
+        changes = {'': self._get_changes(**args)}
+
+        # Cycle through the Team Drives and get those too
+        if include_team_drives:
+            for t in self.team_drives():
+                args.update({'team_drive_id': t})
+                changes['team_drive_{}'.format(t)] = self._get_changes(**args)
+
+        return changes
+
+    def _get_changes(self, spaces, team_drive_id=None, restrict_to_my_drive=False, include_corpus_removals=None,
+                     include_removed=None):
         """
 
-        start_token = self.get_start_page_token()
-        changes = self.service.changes().list(pageToken=start_token['pageToken']).execute()
+        :param str spaces: A comma-separated list of spaces to query within the
+            user corpus. Supported values are 'drive', 'appDataFolder' and
+            'photos'.
+        :param str team_drive_id:
+        :param bool restrict_to_my_drive: Whether to restrict the results to
+            changes inside the My Drive hierarchy. This omits changes to files
+            such as those in the Application Data folder or shared files which
+            have not been added to My Drive.
+        :param bool include_corpus_removals: Whether changes should include the
+            file resource if the file is still accessible by the user at the
+            time of the request, even when a file was removed from the list of
+            changes and there will be no further change entries for this file.
+        :param bool include_removed: Whether to include changes indicating that
+            items have been removed from the list of changes, for example by
+            deletion or loss of access.
+        :return: The list of changes combined from all pages.
+        :rtype: dict
+        """
+        chg = self.service.changes()
+        args = {'supportsTeamDrives': True if team_drive_id is not None else False,
+                'teamDriveId': team_drive_id}
+
+        # Get the first page token
+        start = chg.getStartPageToken(**args).execute()['startPageToken']
+
+        args.update({
+            'pageToken': start,
+            'pageSize': PAGE_SIZE,
+            'includeTeamDriveItems': True if team_drive_id is not None else False,
+            # supportsTeamDrives already defined above
+            'restrictToMyDrive': restrict_to_my_drive,
+            'spaces': spaces,
+            # teamDriveId already defined above
+            'includeCorpusRemovals': include_corpus_removals,
+            'includeRemoved': include_removed,
+        })
+
+        # Send the first request (first page)
+        req = chg.list(**args)
+        resp = req.execute()
+
+        # Process the response
+        if True:
+            raise NotImplementedError
+
         while True:
-            new_changes = self.service.changes().list(pageToken=changes['nextPageToken'], fields=fields).execute()
-            print_json(new_changes)
-            if changes['changes']:
+            req = chg.list_next(previous_request=req, previous_response=resp)
+            resp = req.execute()  # Returns None when there are no more items in the collection
+
+            if resp is None:
                 break
-            changes['changes'] += new_changes['changes']
-        return changes
+
+            # Process the response
+            pass
+
+        # Return all the responses
+        pass
 
     def get_start_page_token(self, supports_team_drive=False, team_drive_id=None):
         """

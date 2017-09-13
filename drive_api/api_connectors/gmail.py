@@ -1,9 +1,13 @@
-from apiclient import discovery
+# -*- coding: utf-8 -*-
 
+from api_connectors.google import GoogleAPI
 from util import print_json
 
 
-class GmailAPI:
+class GmailAPI(GoogleAPI):
+
+    _service_name = 'gmail'
+    _version = 'v1'
 
     def __init__(self, http):
         """
@@ -11,7 +15,7 @@ class GmailAPI:
 
         :param http: http object
         """
-        self.service = discovery.build('gmail', 'v1', http=http)
+        super().__init__(http)
 
     def get_labels(self):
         """

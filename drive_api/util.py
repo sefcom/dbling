@@ -6,71 +6,100 @@ https://developers.google.com/drive/v3/web/quickstart/python
 """
 
 import json
-import os
+from os import path, makedirs
+from warnings import warn, simplefilter, catch_warnings
 
 import httplib2
 from oauth2client import client, tools
 from oauth2client.file import Storage
 
-import env
+import const
 
 
-def get_credentials(scope, application_name, secret, credential_file):
-    """
-    Creates credential file for accessing Google APIs.
+class InvalidCredsError(Exception):
+    """Raised when HTTP credentials don't work."""
+
+
+class MissingConfigWarning(Warning):
+    """"""
+
+
+def get_credentials(scope=const.SCOPES, application_name=const.APPLICATION_NAME, secret=const.CLIENT_SECRET_FILE,
+                    credential_file=const.CREDENTIAL_FILE):
+    """Create the credential file for accessing the Google APIs.
 
     https://developers.google.com/drive/v3/web/quickstart/python
 
-    :param str scope: String of Scopes separated by spaces to give access to different Google APIs
-    :param str application_name: Name of this Application
-    :param str secret: The secret file given from Google
-    :param str credential_file: Name of the credential file to be created
-    :return: Credential Object
+    :param str scope: String of Scopes separated by spaces to give access to
+        different Google APIs.
+    :param str application_name: Name of this Application.
+    :param str secret: The secret file given from Google. Should be named
+        ``client_secret.json``.
+    :param str credential_file: Name of the credential file to be created.
+    :return: Credential object.
+    :raises InvalidCredsError: if the credential file is missing or invalid.
     """
-    cur_dir = os.path.dirname(os.path.realpath('__FILE__'))
-    secret_file_path = os.path.join(cur_dir, str(secret))
-    if os.path.isfile(secret_file_path):
-        credential_dir = os.path.join(cur_dir, '.credentials')
-        if not os.path.exists(credential_dir):
-            os.makedirs(credential_dir)
-        credential_path = os.path.join(credential_dir, str(credential_file))
-        store = Storage(credential_path)
-        credentials = store.get()
-        if not credentials or credentials.invalid:
-            flow = client.flow_from_clientsecrets(secret, scope)
-            flow.user_agent = application_name
-            credentials = tools.run_flow(flow, store)
-    else:
-        print('Client Secret File is missing.\n'
-              'Please go to: https://developers.google.com/drive/v3/web/quickstart/python\n'
-              'To set up the secret file for OAuth 2.0')
-        credentials = False
+    cur_dir = path.dirname(path.realpath('__FILE__'))
+    secret = str(secret)
+    credential_file = str(credential_file)
+
+    # Check that the client secret file is accessible
+    secret_file_path = path.join(cur_dir, secret)
+    if not path.isfile(secret_file_path):
+        raise InvalidCredsError(
+            'Client Secret File is missing.\n'
+            'Please go to: https://developers.google.com/drive/v3/web/quickstart/python\n'
+            'To set up the secret file for OAuth 2.0')
+
+    # Create the directory for credentials (if necessary)
+    credential_dir = path.join(cur_dir, '.credentials')
+    makedirs(credential_dir, exist_ok=True)
+
+    # Fallback to using the default credential filename if none specified
+    if not len(credential_file):
+        credential_file = 'test_creds.json'
+        warn('Filename for credential file not set. Defaulting to: {}'.format(credential_file),
+             MissingConfigWarning)
+    credential_path = path.join(credential_dir, credential_file)
+
+    # Store the OAuth credential locally
+    store = Storage(credential_path)
+    credentials = store.get()
+    if not credentials or credentials.invalid:
+        flow = client.flow_from_clientsecrets(secret, scope)
+        flow.user_agent = application_name
+        credentials = tools.run_flow(flow, store)
     return credentials
 
 
 def set_http(is_domain_wide=False, impersonated_user_email=None):
-    """
-    Creates http object used to communicate with Google
+    """Create and return the http object used to communicate with Google.
 
     https://developers.google.com/drive/v3/web/quickstart/python
 
-    :param boolean is_domain_wide: Turn to True if using domain wide delegation to impersonate a user
-    :param str impersonated_user_email: Email address of the User to be impersonated.
-    :return: http object or False if incorrect Params are used
+    :param boolean is_domain_wide: Turn to True if using domain wide delegation
+        to impersonate a user
+    :param str impersonated_user_email: Email address of the User to be
+        impersonated.
+    :return: http object or False if incorrect parameters are given.
+    :raises InvalidCredsError: if the credential file is missing or invalid.
     """
-    credentials = get_credentials(env.SCOPES, env.APPLICATION_NAME, env.CLIENT_SECRET_FILE, env.CREDENTIAL_FILE)
+    simplefilter('ignore', MissingConfigWarning)
+    with catch_warnings(record=True) as w:
+        simplefilter('always', MissingConfigWarning)
+        credentials = get_credentials()
 
-    if not credentials:
-        http = False
-    else:
-        if is_domain_wide:
-            if impersonated_user_email is None:
-                print('If using domain wide authority please supply an email to impersonate.')
-                http = False
-            else:
-                http = credentials.create_delegated(impersonated_user_email)
+        if len(w):
+            print('\n{}\n'.format(w.pop().message))
+
+    if is_domain_wide:
+        if impersonated_user_email is None:
+            print('If using domain wide authority please supply an email to impersonate.')
+            http = False
         else:
-            http = credentials.authorize(httplib2.Http())
+            http = credentials.create_delegated(impersonated_user_email)
+    else:
+        http = credentials.authorize(httplib2.Http())
 
     return http
 
@@ -101,44 +130,29 @@ def pretty_print(obj):
 
 
 def print_json(obj):
-    """
-    Method to print JSON in human readable format
+    """Print the JSON object in a human readable format.
 
     :param obj: JSON object
-    :return: nothing
+    :type obj: dict or list
+    :rtype: None
     """
     print(json.dumps(obj, sort_keys=True, indent=2))
 
 
 def convert_mime_type_and_extension(google_mime_type):
-    """
+    """Return the conversion type and extension for the given Google MIME type.
+
     Converts mimeType given from google to one of our choosing for export conversion
     This is necessary to download .g* files.
+
     Information on MIME types:
-        https://developers.google.com/drive/v3/web/mime-types
-        https://developers.google.com/drive/v3/web/integrate-open
+    - https://developers.google.com/drive/v3/web/mime-types
+    - https://developers.google.com/drive/v3/web/integrate-open
 
-    :param google_mime_type: mimeType given from Google API
-    :return: string
+    :param str google_mime_type: mimeType given from Google API
+    :return: Tuple in the form (conversion type, extension). If no supported
+        conversion is supported for the given MIME type, the tuple will be
+        ``(False, False)``.
+    :rtype: tuple
     """
-
-    if google_mime_type == env.MIME['g_doc']:
-        conversion_type = env.G_DOCUMENT_TO
-        extension = env.G_DOC_EXTENSION
-    elif google_mime_type == env.MIME['g_draw']:
-        conversion_type = env.G_DRAWINGS_TO
-        extension = env.G_DRAW_EXTENSION
-    elif google_mime_type == env.MIME['g_presentation']:
-        conversion_type = env.G_PRESENTATION_TO
-        extension = env.G_PRES_EXTENSION
-    elif google_mime_type == env.MIME['g_spreadsheet']:
-        conversion_type = env.G_SHEET_TO
-        extension = env.G_SHEET_EXTENSION
-    elif google_mime_type == env.MIME['g_script']:
-        conversion_type = env.G_APPS_SCRIPTS
-        extension = env.G_APPS_EXTENSION
-    else:
-        conversion_type = False
-        extension = False
-
-    return conversion_type, extension
+    return const.CONVERSION.get(const.EMIM[google_mime_type], (False, False))

@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import util
 from api_connectors import *
 
@@ -32,6 +34,17 @@ def main():
         reports = GSuiteReportsAPI(http)
         reports.get_all()
     # Domain wide delegation of authority
+
+
+def get(api):
+    a = {'drive': DriveAPI,
+         'plus': PlusAPI,
+         'people': PeopleAPI,
+         'dir': GSuiteDirectoryAPI,
+         'gmail': GmailAPI,
+         'reports': GSuiteReportsAPI,
+         }
+    return a[api](util.set_http())
 
 
 if __name__ == '__main__':
