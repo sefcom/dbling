@@ -6,7 +6,7 @@ from apiclient import http as http_, discovery
 
 from api_connectors.google import GoogleAPI
 from const import DOWNLOAD_DIRECTORY, MIME, PAGE_SIZE
-from util import print_json, convert_mime_type_and_extension
+from util import print_json, convert_mime_type_and_extension, CalMunch
 
 
 class DriveAPI(GoogleAPI):
@@ -32,6 +32,37 @@ class DriveAPI(GoogleAPI):
         super().__init__(http)
 
         self._team_drives = None
+
+    def activity(self, level='day', what=('files',)):
+        """
+
+        :param str level: Level of detail on the activity. Accepted values:
+
+            - ``'day'``: Activity is summarized by day
+            - ``'segment'``: Activity throughout the day is divided into three
+              segments:
+              - ``mor`` (Morning) 12 AM to 7:59:59 AM
+              - ``mid`` (Midday) 8 AM to 3:59:59 PM
+              - ``eve`` (Evening) 4 PM to 11:59:59 PM
+            - ``'hour'``: Activity is summarized by hour, X:00:00 to X:59:59
+        :param what: Indicates what kind of content to scan for activity.
+            Accepted values:
+
+            - ``'files'``
+            - ``'comments'``
+            - ``'revisions'``
+        :type what: tuple or list
+        :return:
+        """
+        data = CalMunch()
+        for f in self.gen_file_data():
+            print(f)
+            if not f.get('modifiedByMe', False):
+                continue
+            t = f['modifiedByMeTime']
+            print(t)
+            break
+        print(data)
 
     def get_about(self, fields='*'):
         """
@@ -70,13 +101,13 @@ class DriveAPI(GoogleAPI):
         page_token = None
         while True:
             t = self.service.teamdrives().list(pageToken=page_token, pageSize=PAGE_SIZE).execute()
-            assert isinstance(t, dict)
             page_token = t.get('nextPageToken')
             self._team_drives += [x['id'] for x in t['teamDrives']]
 
             # page_token will be None when there are no more pages of results
             if page_token is None:
                 break
+        return self._team_drives
 
     def get_changes(self, spaces='drive', include_team_drives=True, restrict_to_my_drive=False,
                     include_corpus_removals=None, include_removed=None):
@@ -97,7 +128,8 @@ class DriveAPI(GoogleAPI):
         :param str spaces: A comma-separated list of spaces to query within the
             user corpus. Supported values are 'drive', 'appDataFolder' and
             'photos'.
-        :param bool include_team_drives: Whether or not to include
+        :param bool include_team_drives: Whether or not to include data from
+            Team Drives as well as the user's Drive.
         :param bool restrict_to_my_drive: Whether to restrict the results to
             changes inside the My Drive hierarchy. This omits changes to files
             such as those in the Application Data folder or shared files which
@@ -126,8 +158,7 @@ class DriveAPI(GoogleAPI):
         # Cycle through the Team Drives and get those too
         if include_team_drives:
             for t in self.team_drives():
-                args.update({'team_drive_id': t})
-                changes['team_drive_{}'.format(t)] = self._get_changes(**args)
+                changes['team_drive_{}'.format(t)] = self._get_changes(team_drive_id=t, **args)
 
         return changes
 
@@ -154,7 +185,7 @@ class DriveAPI(GoogleAPI):
         :rtype: dict
         """
         chg = self.service.changes()
-        args = {'supportsTeamDrives': True if team_drive_id is not None else False,
+        args = {'supportsTeamDrives': True,  # "Whether the requesting application supports Team Drives."
                 'teamDriveId': team_drive_id}
 
         # Get the first page token
@@ -192,28 +223,6 @@ class DriveAPI(GoogleAPI):
 
         # Return all the responses
         pass
-
-    def get_start_page_token(self, supports_team_drive=False, team_drive_id=None):
-        """
-        Gets the start page token, used to keep track of changes
-
-        getStartPageToken: https://developers.google.com/drive/v3/reference/changes/getStartPageToken
-
-        :param supports_team_drive: Whether the requesting application supports Team Drives. (Default: False)
-        :type supports_team_drive: boolean
-        :param team_drive_id: the ID of the team drive
-        :type team_drive_id: string
-        :return: JSON or None if improper params are in use
-        """
-        # Test to make sure you need both params
-        if team_drive_id is None:
-            token = self.service.changes().getStartPageToken().execute()
-        elif supports_team_drive is True:
-            token = self.service.changes().getStartPageToken(supportsTeamDrives=supports_team_drive).execute()
-        else:
-            print('Need to specify team_drive_id if application supports team drive')
-            return None
-        return token
 
     # Comments
     # TODO Test paging and that replies are returned
@@ -303,6 +312,64 @@ class DriveAPI(GoogleAPI):
         print(len(parent_ids))
 
         return replies, parent_ids
+
+    def gen_file_data(self, spaces='drive', include_team_drives=True, corpora=None):
+        """Generate the metadata for the user's Drive files.
+
+        This function is a generator, so it yields the metadata for one file at
+        a time. For the format of the :class:`dict` generated, see
+        https://developers.google.com/resources/api-libraries/documentation/drive/v3/python/latest/drive_v3.files.html#list
+
+        :param str spaces: A comma-separated list of spaces to query within the
+            user corpus. Supported values are 'drive', 'appDataFolder' and
+            'photos'.
+        :param bool include_team_drives: Whether or not to include data from
+            Team Drives as well as the user's Drive.
+        :param str corpora: Comma-separated list of bodies of items
+            (files/documents) to which the query applies. Supported bodies are
+            'user', 'domain', 'teamDrive' and 'allTeamDrives'. 'allTeamDrives'
+            must be combined with 'user'; all other values must be used in
+            isolation. Prefer 'user' or 'teamDrive' to 'allTeamDrives' for
+            efficiency.
+        :return: The file metadata.
+        :rtype: dict
+        """
+        args = {'spaces': spaces,
+                'corpora': corpora}
+
+        # Get files from regular Drive
+        yield from self._gen_file_data(**args)
+
+        # Cycle through the Team Drives and get those too
+        if include_team_drives:
+            for t in self.team_drives:
+                yield from self._gen_file_data(team_drive_id=t, **args)
+
+    def _gen_file_data(self, spaces, team_drive_id=None, corpora=None):
+        """Helper method for :meth:`gen_file_data`.
+
+        For descriptions of the parameters, see the signature for
+        :meth:`gen_file_data`.
+        """
+        args = {
+            'includeTeamDriveItems': True if team_drive_id is not None else False,
+            'pageSize': PAGE_SIZE,
+            'corpora': corpora,  # Not sure how this affects the results...
+            'supportsTeamDrives': True,
+            'spaces': spaces,
+            'teamDriveId': team_drive_id,
+        }
+
+        page_token = None
+        while True:
+            file_set = self.service.files().list(pageToken=page_token, **args).execute()
+            page_token = file_set.get('nextPageToken')
+            for f in file_set['files']:
+                yield f
+
+            # page_token will be None when there are no more pages of results
+            if page_token is None:
+                break
 
     def list_file_data(self, fields='files(id,name,mimeType,parents,trashed)'):
         """

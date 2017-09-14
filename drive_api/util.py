@@ -10,6 +10,7 @@ from os import path, makedirs
 from warnings import warn, simplefilter, catch_warnings
 
 import httplib2
+from munch import Munch
 from oauth2client import client, tools
 from oauth2client.file import Storage
 
@@ -22,6 +23,52 @@ class InvalidCredsError(Exception):
 
 class MissingConfigWarning(Warning):
     """"""
+
+
+class CalMunch(Munch):
+    """A :class:`dict`-like class for storing hourly data for a whole year.
+
+    This is intended to have a set of keys that correspond to years. Since
+    Python's syntax dictates that objects cannot have attributes with names
+    consisting only of numbers (e.g. ``cal.2017``), one solution would be to
+    name the year keys ``cal.y2017``, ``cal.y2016``, etc. This is the intended
+    convention for :class:`CalMunch` objects and aligns with how month and day
+    data is named.
+
+    Once you have created an instance of :class:`CalMunch`, you can easily
+    create the structures necessary to store a year's worth of data like so:
+
+    >>> cal = CalMunch()
+    >>> cal.y2017
+
+    Just accessing the ``y2017`` attribute assigns it to be a
+    :class:`~munch.Munch` object with 12 keys, one for each month, named
+    ``m01``, ``m02``, ... ``m12``. Each of those keys points to a
+    :class:`~munch.Munch` object with 31 keys, named ``d01`` through ``d31``.
+    The day keys point to a list of 24 integers, initialized to ``0``. This
+    allows you to increment the value for a particular hour immediately after
+    instantiation, like the following, which increments the counter for the
+    2 PM hour block on August 31, 2016:
+
+    >>> cal2 = CalMunch()
+    >>> cal2.y2016.m08.d31[14] += 1
+    """
+
+    def __getattr__(self, k):
+        try:
+            # Throws exception if not in prototype chain
+            return object.__getattribute__(self, k)
+        except AttributeError:
+            try:
+                return self[k]
+            except KeyError:
+                # Populate this with months, days, hours
+                self[k] = Munch({
+                    'm{:02}'.format(x): Munch({
+                        'd{:02}'.format(y): [0]*24 for y in range(1, 32)
+                    }) for x in range(1, 13)
+                })
+                return self[k]
 
 
 def get_credentials(scope=const.SCOPES, application_name=const.APPLICATION_NAME, secret=const.CLIENT_SECRET_FILE,
