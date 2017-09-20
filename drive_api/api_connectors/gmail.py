@@ -9,14 +9,6 @@ class GmailAPI(GoogleAPI):
     _service_name = 'gmail'
     _version = 'v1'
 
-    def __init__(self, http):
-        """
-        Sets service object to make API calls to Google
-
-        :param http: http object
-        """
-        super().__init__(http)
-
     def get_labels(self):
         """
         returns a list of mailbox labels

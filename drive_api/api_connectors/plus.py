@@ -9,14 +9,6 @@ class PlusAPI(GoogleAPI):
     _service_name = 'plus'
     _version = 'v1'
 
-    def __init__(self, http):
-        """
-        Sets service object to make API calls to Google
-
-        :param http: http object
-        """
-        super().__init__(http)
-
     def get_me(self):
         """
         returns Google+ information for the current user

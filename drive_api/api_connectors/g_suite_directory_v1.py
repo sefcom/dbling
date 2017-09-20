@@ -9,16 +9,6 @@ class GSuiteDirectoryAPI(GoogleAPI):
     _service_name = 'admin'
     _version = 'directory_v1'
 
-    def __init__(self, http):
-        """
-        Sets service object to make API calls to Google
-
-        https://developers.google.com/admin-sdk/directory/v1/quickstart/python
-
-        :param http: http object
-        """
-        super().__init__(http)
-
     def test(self):
         """
         example method from Google API quickstart page

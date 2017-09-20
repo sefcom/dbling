@@ -4,13 +4,15 @@
 CLIENT_SECRET_FILE = 'client_secret.json'
 
 # name of the file that is made by get_credentials
-CREDENTIAL_FILE = ''
+CREDENTIAL_FILE = 'test_creds.json'
 # name of the application
 APPLICATION_NAME = 'dbling'
 # Optional, if set to a path the user's drive files will be downloaded to that location
 DOWNLOAD_DIRECTORY = None
 
-PAGE_SIZE = 100
+#: Page size for requests. Specifies the number of records to be returned in a single reply. The accepted range for
+#: most requests is [1, 1000].
+PAGE_SIZE = 1000
 
 
 # Scope: https://developers.google.com/drive/v3/web/about-auth

@@ -1,6 +1,6 @@
 
 .credentials/
-client_secret.json
+*client_secret.json
 .idea/
 
 *.pyc

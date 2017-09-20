@@ -9,14 +9,6 @@ class PeopleAPI(GoogleAPI):
     _service_name = 'people'
     _version = 'v1'
 
-    def __init__(self, http):
-        """
-        Sets service object to make API calls to Google
-
-        :param http: http object
-        """
-        super().__init__(http)
-
     # TODO paging
     def get_contacts(self):
         """

@@ -4,20 +4,18 @@ from api_connectors.google import GoogleAPI
 from util import print_json
 
 
-class GSuiteReportsAPI(GoogleAPI):
+class AdminAPI(GoogleAPI):
+    """Class to interact with G Suite Admin APIs.
+
+    Documentation for the Python API:
+    - https://developers.google.com/resources/api-libraries/documentation/admin/reports_v1/python/latest/
+
+    See also:
+    https://developers.google.com/admin-sdk/reports/v1/quickstart/python
+    """
 
     _service_name = 'admin'
     _version = 'reports_v1'
-
-    def __init__(self, http):
-        """
-        Sets service object to make API calls to Google
-
-        https://developers.google.com/admin-sdk/reports/v1/quickstart/python
-
-        :param http: http object
-        """
-        super().__init__(http)
 
     def test(self):
         """

@@ -31,20 +31,23 @@ def main():
         gmail = GmailAPI(http)
         gmail.get_all()
     if False:
-        reports = GSuiteReportsAPI(http)
+        reports = AdminAPI(http)
         reports.get_all()
     # Domain wide delegation of authority
 
 
-def get(api):
+def get(api, **kwargs):
     a = {'drive': DriveAPI,
          'plus': PlusAPI,
          'people': PeopleAPI,
          'dir': GSuiteDirectoryAPI,
          'gmail': GmailAPI,
-         'reports': GSuiteReportsAPI,
+         'admin': AdminAPI,
          }
-    return a[api](util.set_http())
+    try:
+        return a[api](**kwargs)
+    except KeyError:
+        raise ValueError('Specified API must be one of:\n{}'.format(list(a.keys())))
 
 
 if __name__ == '__main__':
