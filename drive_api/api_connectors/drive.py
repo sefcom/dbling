@@ -14,8 +14,6 @@ from api_connectors.google import GoogleAPI
 from const import DOWNLOAD_DIRECTORY, MIME, PAGE_SIZE
 from util import print_json, convert_mime_type_and_extension, CalDict, DateRange
 
-#: The earliest year to collect data.
-FIRST_YEAR_COLLECTED = 2007
 #: Location of pickled data when cached.
 DRIVE_BACKUP_FILE = path.join(path.abspath(path.dirname(__file__)), '..', 'drive_data_backup.pkl')
 #: Number of hours in a segment. Must be equally divisible by 24 to avoid issues.
@@ -199,7 +197,7 @@ class DriveAPI(GoogleAPI):
                     data_labels.append(label + l)
 
             # Crunch the data
-            dates, data_set = crunch(data_set, level)
+            dates, data_set = crunch(data=data_set, level=level, start=self.start, end=self.end)
 
             # Align the date ranges
             if None in date_range:
@@ -780,13 +778,15 @@ class DriveAPI(GoogleAPI):
             return items
 
 
-def crunch(data, level):
+def crunch(level, **kwargs):
     """Consolidate the data to the specified level.
 
     :param CalDict data: The data from parsing the Drive metadata.
     :param str level: Must be one of ``dy``, ``sg``, or ``hr``. For an
         explanation of these options, see the docstring for
         :meth:`DriveAPI.activity`.
+    :param datetime.date start: The earliest data to collect.
+    :param datetime.date end: The latest data to collect.
     :return: Tuple with two elements. The first is a :class:`DateRange` object
         which stores the first and last days with activity (the range of dates
         that the data corresponds to) in its :attr:`~DateRange.start` and
@@ -808,15 +808,15 @@ def crunch(data, level):
     :rtype: tuple(DateRange, list(list(int)))
     """
     if level == 'dy':
-        return _do_crunch(data, 24)
+        return _do_crunch(num_hours=24, **kwargs)
     elif level == 'sg':
-        return _do_crunch(data, SEGMENT_SIZE)
+        return _do_crunch(num_hours=SEGMENT_SIZE, **kwargs)
     elif level == 'hr':
-        return _do_crunch(data, 1)
+        return _do_crunch(num_hours=1, **kwargs)
     raise ValueError('Unsupported data crunching level: {}'.format(level))
 
 
-def _do_crunch(data, num_hours):
+def _do_crunch(data, num_hours, start=None, end=None):
     """Do the actual data crunching as requested of :func:`crunch`.
 
     :param CalDict data: The data to crunch.
@@ -824,6 +824,8 @@ def _do_crunch(data, num_hours):
         For example, to consolidate the activity for an entire day,
         ``num_hours`` should be 24. To show each hour's activity separately,
         ``num_hours`` should be 1.
+    :param datetime.date start: The earliest data to collect.
+    :param datetime.date end: The latest data to collect.
     :return: See the docs for :func:`crunch`.
     """
     dates = DateRange(None, None)
@@ -845,7 +847,8 @@ def _do_crunch(data, num_hours):
     zeros = 0
 
     for y in years:
-        if y < FIRST_YEAR_COLLECTED:
+        if (start is not None and y < start.year) or \
+                (end is not None and y > end.year):
             continue
         for m in months:
             for d in days:
@@ -853,6 +856,10 @@ def _do_crunch(data, num_hours):
                     day = date(y, m, d)
                 except ValueError:
                     # Means we tried to make an invalid date, like February 30th. Just go to the next day.
+                    continue
+                # Stay within the specified range of dates
+                if (start is not None and day < start) or \
+                        (end is not None and day > end):
                     continue
 
                 # Add up the hourly activity for the day

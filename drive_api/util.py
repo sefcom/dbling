@@ -128,13 +128,14 @@ def get_credentials(scope=const.SCOPES, application_name=const.APPLICATION_NAME,
 
 
 def set_http(impersonated_user_email=None):
-    """Create and return the http object used to communicate with Google.
+    """Create and return the Http object used to communicate with Google.
 
     https://developers.google.com/drive/v3/web/quickstart/python
 
     :param str impersonated_user_email: Email address of the User to be
         impersonated. This uses domain wide delegation to do the impersonation.
-    :return: http object or False if incorrect parameters are given.
+    :return: The Http object.
+    :rtype: httplib2.Http
     :raises InvalidCredsError: if the credential file is missing or invalid.
     """
     simplefilter('ignore', MissingConfigWarning)
@@ -154,39 +155,16 @@ def set_http(impersonated_user_email=None):
     return http
 
 
-# Was going to fix and make this better. Google APIs return json so just made a simple print_json method.
-def pretty_print(obj):
-    """
-    Method to print json
-
-    :param obj: JSON object
-    :return: nothing
-    """
-    if type(obj) == dict:
-        for k, v in obj.items():
-            if hasattr(v, '__iter__'):
-                print(k)
-                pretty_print(v)
-            else:
-                print('%s : %s' % (k, v))
-    elif type(obj) == list:
-        for v in obj:
-            if hasattr(v, '__iter__'):
-                pretty_print(v)
-            else:
-                print(v)
-    else:
-        print(obj)
-
-
-def print_json(obj):
+def print_json(obj, sort=False, indent=2):
     """Print the JSON object in a human readable format.
 
-    :param obj: JSON object
+    :param obj: JSON-serializable object.
     :type obj: dict or list
+    :param bool sort: Whether to sort the keys before printing.
+    :param int indent: Number of spaces to indent.
     :rtype: None
     """
-    print(json.dumps(obj, sort_keys=True, indent=2))
+    print(json.dumps(obj, sort_keys=bool(sort), indent=indent if isinstance(indent, int) else None))
 
 
 def convert_mime_type_and_extension(google_mime_type):
