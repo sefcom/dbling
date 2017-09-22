@@ -1,31 +1,44 @@
 # -*- coding: utf-8 -*-
 
 from api_connectors.google import GoogleAPI
-from util import print_json
 
 
-class GSuiteDirectoryAPI(GoogleAPI):
+class DirectoryAPI(GoogleAPI):
 
     _service_name = 'admin'
     _version = 'directory_v1'
 
-    def test(self):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def list_chromeos_devices(self, fields='*'):
+        """List up to 100 Chrome OS devices in the organization.
+
+        API:
+        https://developers.google.com/resources/api-libraries/documentation/admin/directory_v1/python/latest/admin_directory_v1.chromeosdevices.html
+
+        Reference:
+        https://developers.google.com/admin-sdk/directory/v1/reference/chromeosdevices/list
+
+        :param str fields: Comma-separated list of metadata fields to request.
+        :return: The list of Chrome OS devices. See one of the documentation
+            links above for the format of the return value.
+        :rtype: list
         """
-        example method from Google API quickstart page
+        items = []
+        page_token = None
+        args = {'customerId': self.customer_id,
+                'projection': 'FULL',
+                'fields': fields}
 
-        https://developers.google.com/admin-sdk/directory/v1/quickstart/python
+        while True:
+            dev_set = self.service.chromeosdevices().list(pageToken=page_token, **args).execute()
+            page_token = dev_set.get('nextPageToken')
+            items += dev_set.get('chromeosdevices', [])
 
-        :return: nothing
-        """
-        results = self.service.users().list(customer='my_customer', maxResults=10, orderBy='email').execute()
-        users = results.get('users', [])
-
-        if not users:
-            print('No users in the domain.')
-        else:
-            print('Users:')
-            for user in users:
-                print('{0} ({1})'.format(user['primaryEmail'], user['name']['fullName']))
+            if page_token is None:
+                break
+        return items
 
     def get_user(self, user_email):
         """
@@ -50,18 +63,6 @@ class GSuiteDirectoryAPI(GoogleAPI):
         """
         users = self.service.users().list(domain=domain_name).execute()
         return users
-
-    def list_users_chrome_os_device(self, customer_id):
-        """
-        Lists all chromeos_devices owned by a customer.
-
-        https://developers.google.com/admin-sdk/directory/v1/reference/chromeosdevices/list
-
-        :param customer_id: The unique ID for the customer's G Suite account.
-        :return: JSON
-        """
-        devices = self.service.chromeosdevices().list(customerId=customer_id).execute()
-        return devices
 
     def get_chrome_os_devices_properties(self, customer_id, device_id):
         """
@@ -128,12 +129,3 @@ class GSuiteDirectoryAPI(GoogleAPI):
         request_body = {'suspended': False}
         return_info = self.service.users.update(userKey=user_email, body=request_body).execute()
         return return_info
-
-    def get_all(self):
-        """
-        Testing method
-
-        :return: Nothing
-        """
-        if True:
-            print_json(self.get_all_users('adamdoupe.com'))
