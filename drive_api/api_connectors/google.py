@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from apiclient import discovery
+from httplib2 import Http
 from maya import parse, when, get_localzone
 from pytz import all_timezones
 
@@ -40,8 +41,6 @@ class GoogleAPI:
         if NotImplemented in (self._service_name, self._version):
             raise ValueError('Implementing classes of GoogleAPI must set a value for _service_name and _version.')
 
-        if http is None:
-            http = set_http(impersonated_user_email=impersonated_user_email)
         self.email = impersonated_user_email
 
         # By default, set the timezone to whatever the local timezone is. Otherwise set it to what the user specified.
@@ -67,8 +66,24 @@ class GoogleAPI:
             except ValueError:
                 self.end = when(end).datetime().date()
 
+        self.customer_id = 'my_customer'  # Only used by directory API
+
+        # The following are accessed by their respective class properties
+        self._http = http
+        self._service = None
+
+    @property
+    def http(self):
+        if self._http is None or not isinstance(self._http, Http):
+            self._http = set_http(impersonated_user_email=self.email)
+        return self._http
+
+    @property
+    def service(self):
         # Create the service object, which provides a connection to Google
-        self.service = discovery.build(serviceName=self._service_name, version=self._version, http=http)
+        if self._service is None:
+            self._service = discovery.build(serviceName=self._service_name, version=self._version, http=self.http)
+        return self._service
 
     def get_all(self):
         raise NotImplementedError

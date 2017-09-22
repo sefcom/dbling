@@ -43,7 +43,7 @@ class DriveAPI(GoogleAPI):
 
         self._team_drives = None
 
-    def activity(self, level='dy', what=('files', 'revisions'), use_cached=False, **kwargs):
+    def activity(self, level, what=('files', 'revisions'), use_cached=False, **kwargs):
         """Compile the user's activity.
 
         Note about revision history: One of the metadata fields for file
@@ -79,6 +79,10 @@ class DriveAPI(GoogleAPI):
         :raises ValueError: When the ``level`` or ``what`` parameters have an
             unsupported format or value.
         """
+        cr, rev, com = self.activity_data(level, what, use_cached)
+        return self.activity_plot(created_data=cr, revision_data=rev, comment_data=com, level=level, what=what)
+
+    def activity_data(self, level, what=('files', 'revisions'), use_cached=False):
         # Validate parameter values
         if level not in ('dy', 'sg', 'hr'):
             raise ValueError('Unsupported activity level: {}'.format(level))
@@ -87,10 +91,6 @@ class DriveAPI(GoogleAPI):
         for w in what:
             if w not in ('created', 'revisions', 'comments'):
                 raise ValueError('Unsupported activity content type: {}'.format(w))
-
-        data = []  # Will become the z-axis in the figure. list(list(int))
-        data_labels = []  # Will become the labels of the y-axis in the figure
-        date_range = DateRange(None, None)  # Will become the labels of the x-axis in the figure
 
         cache_ok = True
         if use_cached:
@@ -159,6 +159,13 @@ class DriveAPI(GoogleAPI):
                 pickle.dump((created_data, modified_data, revision_data, comment_data), f, protocol=-1)
 
             # END OF FRESH DOWNLOAD CODE
+
+        return created_data, revision_data, comment_data
+
+    def activity_plot(self, created_data, revision_data, comment_data, level, what):
+        data = []  # Will become the z-axis in the figure. list(list(int))
+        data_labels = []  # Will become the labels of the y-axis in the figure
+        date_range = DateRange(None, None)  # Will become the labels of the x-axis in the figure
 
         # Prep the labels
         segment_labels = ['{:02}00 to {:02}59'.format(x, x+SEGMENT_SIZE-1) for x in range(24) if not x % SEGMENT_SIZE]

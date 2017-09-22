@@ -3,6 +3,7 @@
 """Gripper - Google Drive Activity Ripper
 
 Usage: gripper.py drive [options] (created | revised | comment) ...
+       gripper.py reports [options]
 
 Options:
  -c --cached    Use a cached version of the data, if available.
@@ -60,6 +61,8 @@ def main(**kwargs):
 
     if kwargs.get('drive'):
         api, title = 'drive', 'User Activity on Google Drive'
+    elif kwargs.get('reports'):
+        api, title = 'reports', 'Something Awesome'
     else:
         # This should never happen since docopt validates commands for us
         raise ValueError('No known command given')
@@ -83,7 +86,7 @@ def main(**kwargs):
         __IPYTHON__
     except NameError:
         url = py.plot(**plot_args)
-        print('The plotted figure is now available at:\n{}'.format(url))
+        print('The plotted figure is now available at:\n{}\n'.format(url))
     else:
         py.iplot(**plot_args)
 
