@@ -1,47 +1,54 @@
 #! /usr/bin/env python3
 # *-* coding: utf-8 *-*
-"""Gripper - Google Drive Activity Ripper
+"""
+Command line::
 
-Usage: gripper.py drive [options] (created | revised | comment) ...
-       gripper.py reports [options]
+ Usage: gripper.py drive [options] (created | revised | comment) ...
+        gripper.py reports [options]
 
-Options:
- -c --cached    Use a cached version of the data, if available.
- -e EMAIL --email=EMAIL
-                The email address of a user to impersonate. This requires
-                domain-wide delegation to be activated. See
-                https://developers.google.com/admin-sdk/reports/v1/guides/delegation
-                for instructions.
- --level=LEVEL  The granularity level of the resulting heat map [default: hr]
- --start=START -s START
-                The earliest data to collect. Can be any kind of date string,
-                as long as it is unambiguous (e.g. "2017"). It can even be
-                slang, such as "a year ago". Be aware, however, that only the
-                *day* of the date will be used, meaning time information will
-                be discarded.
- --end=END -e END
-                The latest data to collect. Same format rules apply for this
-                as for --start.
- --tz=TIMEZONE  The timezone to convert all timestamps to before compiling.
-                This should be a standard timezone name. For reference, the
-                list that the timezone will be compared against is available
-                at https://github.com/newvem/pytz/blob/master/pytz/__init__.py.
-                If omitted, the local timezone of the computer will be used.
+ Options:
+  -c --cached    Use a cached version of the data, if available.
+  -e EMAIL --email=EMAIL
+                 The email address of a user to impersonate. This requires
+                 domain-wide delegation to be activated. See
+                 https://developers.google.com/admin-sdk/reports/v1/guides/delegation
+                 for instructions.
+  --level=LEVEL  The granularity level of the resulting heat map [default: hr]
+  --start=START -s START
+                 The earliest data to collect. Can be any kind of date string,
+                 as long as it is unambiguous (e.g. "2017"). It can even be
+                 slang, such as "a year ago". Be aware, however, that only the
+                 *day* of the date will be used, meaning time information will
+                 be discarded.
+  --end=END -e END
+                 The latest data to collect. Same format rules apply for this
+                 as for --start.
+  --tz=TIMEZONE  The timezone to convert all timestamps to before compiling.
+                 This should be a standard timezone name. For reference, the
+                 list that the timezone will be compared against is available
+                 at https://github.com/newvem/pytz/blob/master/pytz/__init__.py.
+                 If omitted, the local timezone of the computer will be used.
 
-Note: If you start this script using ipython (recommended), you'll need to
-invoke it like this:
+ Note: If you start this script using ipython (recommended), you'll need to
+ invoke it like this:
 
-    $ ipython3 gripper.py -- [typical arguments]
+     $ ipython3 gripper.py -- [typical arguments]
 
-The reason for this is that ipython interprets any options *before* the ``--``
-as being meant for it.
+ The reason for this is that ipython interprets any options *before* the ``--``
+ as being meant for it.
 """
 
 import plotly.plotly as py
 
 from docopt import docopt
 
-from apis import get_api
+try:
+    from apis import get_api
+except ImportError:
+    import sys
+    from os import path
+    sys.path.append(path.abspath(path.dirname(__file__)))
+    from apis import get_api
 from plot import heatmap
 
 

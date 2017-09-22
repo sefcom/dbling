@@ -5,6 +5,8 @@ from util import print_json
 
 
 class PeopleAPI(GoogleAPI):
+    """Class to interact with Google People APIs.
+    """
 
     _service_name = 'people'
     _version = 'v1'

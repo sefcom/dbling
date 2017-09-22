@@ -24,25 +24,16 @@ class DriveAPI(GoogleAPI):
     """Class to interact with Google Drive APIs.
 
     Documentation for the Python API:
+
     - https://developers.google.com/resources/api-libraries/documentation/drive/v3/python/latest/index.html
+
+    Quick start guide:
+
+    - https://developers.google.com/drive/v3/web/quickstart/python
     """
 
     _service_name = 'drive'
     _version = 'v3'
-
-    def __init__(self, http=None, impersonated_user_email=None, timezone=None):
-        """
-        Sets service object to make API calls to Google
-
-        https://developers.google.com/drive/v3/web/quickstart/python
-
-        :param http: http object
-        :return DriveAPI Object
-        """
-        super().__init__(http, impersonated_user_email, timezone)
-        # m = [x for x in dir(str) if x.startswith('s')]  # TODO: Playing around with a more intelligent get_all()
-
-        self._team_drives = None
 
     def activity(self, level, what=('files', 'revisions'), use_cached=False, **kwargs):
         """Compile the user's activity.
@@ -58,11 +49,9 @@ class DriveAPI(GoogleAPI):
 
             - ``'dy'``: Activity is summarized by day
             - ``'hr'``: Activity is summarized by hour, X:00:00 to X:59:59
-            - ``'sg'``: Activity throughout the day is divided into three
-              segments:
-              - ``mor`` (Morning) 12 AM to 7:59:59 AM
-              - ``mid`` (Midday) 8 AM to 3:59:59 PM
-              - ``eve`` (Evening) 4 PM to 11:59:59 PM
+            - ``'sg'``: Activity throughout the day is divided into a number
+              of segments (defined to be :data:`SEGMENT_SIZE` divided by
+              ``24``).
         :param what: Indicates what kind of content to scan for activity.
             Accepted values:
 
@@ -785,41 +774,6 @@ class DriveAPI(GoogleAPI):
         else:
             return items
 
-    def get_all(self):
-        """
-        method used for testing
-
-        :return: nothing
-        """
-        if False:
-            print('File Data')
-            metadata = self.list_file_data()
-            print_json(metadata)
-        if False:
-            print('About')
-            about_info = self.get_about()
-            print_json(about_info)
-        if False:
-            start_token = self.get_start_page_token()
-            print_json(start_token)
-        if True:
-            changes = self.get_changes()
-            print_json(changes)
-        if False:
-            comments, ids = self.get_comments()
-            print_json(comments)
-            print_json(ids)
-            if False:
-                replies, parents = self.get_replies(comments, ids)
-                print_json(replies)
-                print_json(ids)
-        if False:
-            app_folder = self.get_app_folder()
-            print_json(app_folder)
-
-        if False:
-            self.download_files()
-
 
 def crunch(level, **kwargs):
     """Consolidate the data to the specified level.
@@ -840,12 +794,12 @@ def crunch(level, **kwargs):
         the data for each day. The contents of this list vary based on the
         value of ``level``:
 
-        - ``dy``: A single :class:`list` of :class:`int`s, one for each day.
-        - ``sg``: :class:`list`s of :class:`int`s. Each `list` corresponds to
+        - ``dy``: A single :class:`list` of :class:`int` s, one for each day.
+        - ``sg``: :class:`list` s of :class:`int` s. Each `list` corresponds to
           a segment, each `int` corresponds to a day. These lists are in
           reverse order, meaning the first `list` represents the last segment
           of a day.
-        - ``hr``: :class:`list`s of :class:`int`s. Each `list` corresponds to
+        - ``hr``: :class:`list` s of :class:`int` s. Each `list` corresponds to
           an hour, each `int` corresponds to a day. These lists are in reverse
           order, meaning the first `list` represents the last hour of a day.
     :rtype: tuple(DateRange, list(list(int)))

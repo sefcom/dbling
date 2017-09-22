@@ -13,7 +13,12 @@ import httplib2
 from oauth2client import client, tools
 from oauth2client.file import Storage
 
-import const
+try:
+    import const
+except ImportError:
+    import sys
+    sys.path.append(path.abspath(path.dirname(__file__)))
+    import const
 
 
 class InvalidCredsError(Exception):
@@ -79,21 +84,33 @@ class DateRange:
         return [self.start, self.end].__iter__()
 
 
-def get_credentials(scope=const.SCOPES, application_name=const.APPLICATION_NAME, secret=const.CLIENT_SECRET_FILE,
-                    credential_file=const.CREDENTIAL_FILE):
+def get_credentials(scope=None, application_name=None, secret=None, credential_file=None):
     """Create the credential file for accessing the Google APIs.
 
     https://developers.google.com/drive/v3/web/quickstart/python
 
     :param str scope: String of Scopes separated by spaces to give access to
-        different Google APIs.
-    :param str application_name: Name of this Application.
+        different Google APIs. Defaults to :data:`~google.const.SCOPES`.
+    :param str application_name: Name of this Application. Defaults to
+        :data:`~google.const.APPLICATION_NAME`.
     :param str secret: The secret file given from Google. Should be named
-        ``client_secret.json``.
+        ``client_secret.json``. Defaults to
+        :data:`~google.const.CLIENT_SECRET_FILE`.
     :param str credential_file: Name of the credential file to be created.
+        Defaults to :data:`~google.const.CREDENTIAL_FILE`.
     :return: Credential object.
     :raises InvalidCredsError: if the credential file is missing or invalid.
     """
+    # Set default values
+    if scope is None:
+        scope = const.SCOPES
+    if application_name is None:
+        application_name = const.APPLICATION_NAME
+    if secret is None:
+        secret = const.CLIENT_SECRET_FILE
+    if credential_file is None:
+        credential_file = const.CREDENTIAL_FILE
+
     cur_dir = path.dirname(path.realpath('__FILE__'))
     secret = str(secret)
     credential_file = str(credential_file)
@@ -174,6 +191,7 @@ def convert_mime_type_and_extension(google_mime_type):
     This is necessary to download .g* files.
 
     Information on MIME types:
+
     - https://developers.google.com/drive/v3/web/mime-types
     - https://developers.google.com/drive/v3/web/integrate-open
 

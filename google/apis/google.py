@@ -9,13 +9,16 @@ from util import set_http
 
 
 class GoogleAPI:
+    """Interface to the Google API.
+
+    See the documentation for subclasses for more detailed information.
+    """
 
     _service_name = NotImplemented
     _version = NotImplemented
 
     def __init__(self, http=None, impersonated_user_email=None, start=None, end=None, timezone=None):
-        """Interface to the Google API.
-
+        """
         :param httplib2.Http http: An Http object for sending the requests. In
             general, this should be left as None, which will allow for
             auto-adjustment of the kind of Http object to create based on
@@ -28,7 +31,7 @@ class GoogleAPI:
         :param str start: The earliest data to collect. Can be any kind of date
             string, as long as it is unambiguous (e.g. "2017"). It can even be
             slang, such as "a year ago". Be aware, however, that only the *day*
-            of the date will be used, meaning time information will be
+            of the date will be used, meaning *time* information will be
             discarded.
         :param str end: The latest data to collect. Same format rules apply for
             this as for the ``start`` parameter.
@@ -71,6 +74,7 @@ class GoogleAPI:
         # The following are accessed by their respective class properties
         self._http = http
         self._service = None
+        self._team_drives = None
 
     @property
     def http(self):

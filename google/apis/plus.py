@@ -5,6 +5,8 @@ from util import print_json
 
 
 class PlusAPI(GoogleAPI):
+    """Class to interact with Google Plus APIs.
+    """
 
     _service_name = 'plus'
     _version = 'v1'

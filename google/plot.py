@@ -10,7 +10,7 @@ STOP_FACTOR = 80
 
 
 def stop(i):
-    """Return the ``i``th color stop.
+    """Return the ``i`` th color stop.
 
     In color gradients, the point where a defined color is (as opposed to in
     between the defined colors, where the colors are "graded") is called a
@@ -26,11 +26,11 @@ def stop(i):
 
     .. math::
 
-       (m^(i/(n - 1)) - 1) / (m - 1)
+       \\frac{m^{(i/(n - 1))} - 1}{m - 1}
 
     :param int i: The current stop number. Must be a value between 0 and
         ``len(HEATMAP_COLORS) - 1``, i.e. ``[0, n)``.
-    :return: Where the ``i``th color stop should occur. Will always be a value
+    :return: Where the ``i`` th color stop should occur. Will always be a value
         between 0 and 1.
     :rtype: float
     :raise ValueError: When ``i`` isn't between 0 and

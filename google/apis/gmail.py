@@ -5,6 +5,8 @@ from util import print_json
 
 
 class GmailAPI(GoogleAPI):
+    """Class to interact with Google Gmail APIs.
+    """
 
     _service_name = 'gmail'
     _version = 'v1'

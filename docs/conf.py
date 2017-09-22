@@ -14,11 +14,12 @@ extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.intersphinx',
     'sphinx.ext.viewcode',
+    'sphinx.ext.mathjax',
 ]
 
 intersphinx_mapping = {'python': ('https://docs.python.org/3.5', None),
                        'graph_tool': ('https://graph-tool.skewed.de/doc', None),
-                       'pymemcache': ('https://pymemcache.readthedocs.io/en/latest/', None)
+                       'pymemcache': ('https://pymemcache.readthedocs.io/en/latest/', None),
                        }
 
 # Show the docstring from both the class and its __init__() method

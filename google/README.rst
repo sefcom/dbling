@@ -27,6 +27,9 @@ Prerequisites
 Installing
 ~~~~~~~~~~
 
+.. running_goes_here
+
+
 Bugs or Issues
 ~~~~~~~~~~~~~~
 
@@ -43,6 +46,9 @@ then: ``kill -9 PID``
 
 Or you can click the click provided in the terminal and then copy and paste
 the key from the webpage that is launched.
+
+.. start_mime_info
+
 
 MIME Type Info
 --------------

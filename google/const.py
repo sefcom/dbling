@@ -1,13 +1,15 @@
-# This file is obtained from Google through the API pages. Guide posted below
-# https://developers.google.com/identity/protocols/OAuth2WebServer
-# Look for Create authorization credentials subsection
+#: This file is obtained from Google through the API pages. Guide posted below
+#:
+#: - https://developers.google.com/identity/protocols/OAuth2WebServer
+#:
+#: Look for the "Create authorization credentials" subsection
 CLIENT_SECRET_FILE = 'client_secret.json'
 
-# name of the file that is made by get_credentials
+#: Name of the file that is made by get_credentials
 CREDENTIAL_FILE = 'test_creds.json'
-# name of the application
+#: Name of the application
 APPLICATION_NAME = 'dbling'
-# Optional, if set to a path the user's drive files will be downloaded to that location
+#: Optional, if set to a path the user's drive files will be downloaded to that location
 DOWNLOAD_DIRECTORY = None
 
 #: Page size for requests. Specifies the number of records to be returned in a single reply. The accepted range for
@@ -15,7 +17,7 @@ DOWNLOAD_DIRECTORY = None
 PAGE_SIZE = 1000
 
 
-# Scope: https://developers.google.com/drive/v3/web/about-auth
+#: Scope: https://developers.google.com/drive/v3/web/about-auth
 SCOPES = 'https://www.googleapis.com/auth/drive.readonly ' \
          'https://www.googleapis.com/auth/drive.appfolder ' \
          'https://www.googleapis.com/auth/plus.login ' \
