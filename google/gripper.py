@@ -41,7 +41,7 @@ import plotly.plotly as py
 
 from docopt import docopt
 
-from api_connectors import get_api
+from apis import get_api
 from plot import heatmap
 
 

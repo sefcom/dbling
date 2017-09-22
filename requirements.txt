@@ -5,4 +5,4 @@ ansible
 -r merl/requirements.txt
 -r other/requirements.txt
 -r secret/requirements.txt
--r drive_api/requirements.txt
+-r google/requirements.txt

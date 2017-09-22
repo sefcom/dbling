@@ -87,3 +87,8 @@ class GoogleAPI:
 
     def get_all(self):
         raise NotImplementedError
+        # TODO: Finish intelligent get_all
+        r = {}
+        for m in [x for x in dir(self) if x.startswith('get_')]:
+            r[m[4:]] = getattr(self, m)()
+        return r

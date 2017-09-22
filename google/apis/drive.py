@@ -10,7 +10,7 @@ import maya
 from apiclient import http as http_, discovery
 from progressbar import ProgressBar, UnknownLength
 
-from api_connectors.google import GoogleAPI
+from apis.google import GoogleAPI
 from const import DOWNLOAD_DIRECTORY, MIME, PAGE_SIZE
 from util import print_json, convert_mime_type_and_extension, CalDict, DateRange
 
@@ -40,6 +40,7 @@ class DriveAPI(GoogleAPI):
         :return DriveAPI Object
         """
         super().__init__(http, impersonated_user_email, timezone)
+        # m = [x for x in dir(str) if x.startswith('s')]  # TODO: Playing around with a more intelligent get_all()
 
         self._team_drives = None
 
@@ -783,6 +784,41 @@ class DriveAPI(GoogleAPI):
             return None
         else:
             return items
+
+    def get_all(self):
+        """
+        method used for testing
+
+        :return: nothing
+        """
+        if False:
+            print('File Data')
+            metadata = self.list_file_data()
+            print_json(metadata)
+        if False:
+            print('About')
+            about_info = self.get_about()
+            print_json(about_info)
+        if False:
+            start_token = self.get_start_page_token()
+            print_json(start_token)
+        if True:
+            changes = self.get_changes()
+            print_json(changes)
+        if False:
+            comments, ids = self.get_comments()
+            print_json(comments)
+            print_json(ids)
+            if False:
+                replies, parents = self.get_replies(comments, ids)
+                print_json(replies)
+                print_json(ids)
+        if False:
+            app_folder = self.get_app_folder()
+            print_json(app_folder)
+
+        if False:
+            self.download_files()
 
 
 def crunch(level, **kwargs):

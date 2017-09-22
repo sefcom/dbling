@@ -1,8 +1,8 @@
-from api_connectors.drive import DriveAPI
-from api_connectors.admin import ReportsAPI, DirectoryAPI
-from api_connectors.gmail import GmailAPI
-from api_connectors.people import PeopleAPI
-from api_connectors.plus import PlusAPI
+from apis.drive import DriveAPI
+from apis.admin import ReportsAPI, DirectoryAPI
+from apis.gmail import GmailAPI
+from apis.people import PeopleAPI
+from apis.plus import PlusAPI
 
 __all__ = ['DriveAPI', 'GSuiteDirectoryAPI', 'AdminAPI', 'GmailAPI', 'PeopleAPI', 'PlusAPI']
 

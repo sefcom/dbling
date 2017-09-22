@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from api_connectors.google import GoogleAPI
+from apis.google import GoogleAPI
 from util import print_json
 
 
