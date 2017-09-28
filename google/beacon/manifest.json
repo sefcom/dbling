@@ -1,0 +1,12 @@
+{
+  "manifest_version": 2,
+  "name": "dbling_beacon",
+  "version": "0.0.1",
+  "app": {
+    "background": {
+      "scripts": [ "dblingBeacon.js" ]
+    }
+  },
+  "offline_enabled": true,
+  "permissions": ["identity", "identity.email", "storage", "system", "system.network"]
+}
