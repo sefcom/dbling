@@ -22,7 +22,6 @@ Please refer to the following documents for information on the API:
    :maxdepth: 2
 
    apis
-   other
 
 
 .. include:: ../../google/README.rst

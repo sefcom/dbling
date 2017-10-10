@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""
-Usage: graph_diff.py [options]
+"""Find the differences between two graph objects.
 
-Options:
- -f FILE   Save duplicate data to FILE
- -d        Show only files at a depth below home >= the Extensions dir (7)
- -v        Set logging level from INFO to DEBUG
+Command line::
+
+ Usage: graph_diff.py [options]
+
+ Options:
+  -f FILE   Save duplicate data to FILE
+  -d        Show only files at a depth below home >= the Extensions dir (7)
+  -v        Set logging level from INFO to DEBUG
 
 """
 
@@ -101,8 +104,7 @@ class _GraphDiff(object):
         logging.shutdown()  # Flush and close all handlers
 
     def graph_copy(self):
-        """
-        Return a copy of the graph object.
+        """Return a copy of the graph object.
 
         :return: A copy of the graph.
         :rtype: DblingGraph
@@ -199,17 +201,16 @@ class _GraphDiff(object):
                    )
 
     def add_from_file(self, file_path, img_file_id=1):
-        """
+        """Create a graph from the given DFXML file.
+
         Given the path to a DFXML file, add nodes and edges to the digraph
         representing its fileobjects.
 
-        :param file_path: Path to the DFXML file from which to create the digraph.
-        :type file_path: str
-        :param img_file_id: ID number for the image file being processed. Used
-            to identify file objects that are common or unique to each of the
-            images.
-        :type img_file_id: int
-        :return: None
+        :param str file_path: Path to the DFXML file from which to create the
+            digraph.
+        :param int img_file_id: ID number for the image file being processed.
+            Used to identify file objects that are common or unique to each of
+            the images.
         :rtype: None
         """
         # The DFXML version of this script uses attributes the other version doesn't use
@@ -473,6 +474,12 @@ class _GraphDiff(object):
             self.digr.add_edge(u, v, False)
 
     def add_from_mount(self, mount_point):
+        """Create a graph from the files in ``mount_point``.
+
+        :param str mount_point: Directory where a disk image has been mounted
+            to the file system.
+        :rtype: None
+        """
         # TODO: Do we need to keep from adding duplicates to this graph?
         logging.info('Beginning import from mount point: %s' % mount_point)
         make_graph_from_dir(mount_point, self.digr)
@@ -564,10 +571,10 @@ class _GraphDiff(object):
         raise DuplicatesCompleted
 
     def trim_unuseful(self, filter_depth=False):
-        """
-        Remove unuseful vertices from the graph. This is the entry point to the
-        recursive method _check_eval() that starts the process with all the
-        child vertices of "home".
+        """Remove unuseful vertices from the graph.
+
+        This is the entry point to the recursive method _check_eval() that
+        starts the process with all the child vertices of "home".
 
         :param filter_depth: If True, all nodes with a depth < MIN_DEPTH will
             also be removed from the graph.
@@ -682,36 +689,36 @@ class ColorDiff(_GraphDiff):
 
 
 class FilesDiff(_GraphDiff):
+    """Graph difference finder implementation."""
 
     def __init__(self):
         super().__init__()
         logging.info('DFXML Files Diff initialized.')
 
     def _check_eval(self, vertex, force_false=False):
-        """
-        Recursively search successor vertices, evaluating their usefulness. A
-        vertex is useful if:
+        """Recursively search successor vertices, evaluating their usefulness.
+
+        A vertex is useful if:
 
         1. Any of its children are useful
         2. At least one of the following is true:
-          a. It is a leaf node
-          b. It is at the depth of the Extensions directory and is an
-             encrypted directory
-          c. It is at the depth of either the Extensions directory or the
-             <Extension ID> directory and has only non-empty directory
-             successors
+
+           a. It is a leaf node
+           b. It is at the depth of the ``Extensions`` directory and is an
+              encrypted directory
+           c. It is at the depth of either the ``Extensions`` directory or the
+              ``<Extension ID>`` directory and has only non-empty directory
+              successors
 
         When this recursive method is followed directly by another pass over
         the vertices to remove all that are not of minimum depth, the
         subgraphs that remain are prime candidates for extension directories.
 
-        :param vertex: The vertex object to evaluate.
-        :type vertex: Vertex
-        :param force_false: Useful for when a vertex is found that violates a
-            required condition, mark all successor vertices to the given
-            vertex for deletion.
-        :type force_false: bool
-        :return: True (useful, keep) or False (not useful, delete)
+        :param Vertex vertex: The vertex object to evaluate.
+        :param bool force_false: Useful for when a vertex is found that
+            violates a required condition, mark all successor vertices to the
+            given vertex for deletion.
+        :return: `True` (useful, keep) or `False` (not useful, delete)
         :rtype: bool
         """
         # It's probably too late to call this, but it marks this function as using the extended attributes
@@ -789,8 +796,7 @@ class FilesDiff(_GraphDiff):
 
 
 def vertex_is_dir(vertex, graph, strict=False):
-    """
-    Given a vertex, return whether it represents a directory.
+    """Given a vertex, return whether it represents a directory.
 
     :param vertex: The vertex to test.
     :type vertex: graph_tool.Vertex
@@ -812,11 +818,21 @@ def vertex_is_dir(vertex, graph, strict=False):
     return False
 
 
+#: A dummy path that makes it easier to calculate the minimum depth we should
+#: look for without making errors.
 FILTERED_MIN_DEPTH = get_dir_depth('/home/.shadow/<user ID>/vault/user/<encrypted Extensions>/'
                                    '<encrypted extension ID>/<encrypted extension version>/')
 
 
 def init_logging(log_file=None, verbose=False):
+    """Initialize logging with some common settings.
+
+    :param str log_file: Path to the logging file. Defaults to the path
+        (relative to this file) ``../log/graph_diff.log``.
+    :param bool verbose: Flag that changes the logging level from INFO to
+        DEBUG.
+    :rtype: None
+    """
     if log_file is None:
         _log_path = path.join(path.dirname(path.realpath(__file__)), '../log', "graph_diff.log")
     else:
@@ -883,14 +899,14 @@ def main(args):
         except DuplicatesCompleted:
             diff.deinit(False, dup=True)
             return
-        except:
+        except Exception:
             diff.deinit(False)
             raise
 
     try:
         diff.trim_unuseful(filter_depth=args['-d'])
         diff.show_graph()
-    except:
+    except Exception:
         diff.deinit(False)
         raise
     diff.deinit()

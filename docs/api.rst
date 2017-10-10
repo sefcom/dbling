@@ -7,5 +7,5 @@ dbling API
    crawl
    profile
    merl
-   google/index
+   google/apis
    common/index

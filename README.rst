@@ -43,7 +43,7 @@ The Crawler finds and downloads the list of the currently-available extensions o
 extensions are at a version that has already been downloaded, downloads those that have not yet been downloaded, and
 adds information on the newly downloaded extensions to the database.
 
-The code for the Crawler is under `crawl`.
+The documentation for the Crawler code is under `crawl`.
 
 
 Template Generator
@@ -62,19 +62,37 @@ is :func:`~common.centroid.calc_centroid`.
 Profiler
 ~~~~~~~~
 
-Coming soon!
+The Profiler is a command line tool designed for use by forensic examiners to create profiles of the extensions
+installed on a disk image. This is the piece of code that uses the information about Chrome OS's disk and file system
+layout to identify the most likely encrypted directories to contain installed extensions. It then leverages the MERL
+Exporter to interpret the results against the database of extension templates and store them to a MERL file.
+
+The documentation for the Profiler code is under :doc:`profile`.
 
 
 MERL Exporter
 ~~~~~~~~~~~~~
 
-Coming soon!
+The MERL Exporter creates a MERL file based on a set of information on extension candidates. The MERL Exporter is used
+directly by the Profiler to query the database of extension fingerprints (originally created by the Template Generator)
+for matching extension profiles and filters them using a set of given criteria. It then saves the results of the profile
+search by translating the results into XML entries that conform to the MERL schema.
+
+The documentation for the MERL Exporter code is under :doc:`merl`.
 
 
-gripper
+Gripper
 ~~~~~~~
 
-Coming soon!
+Gripper leverages the APIs provided by G Suite to acquire data about a user's activities on a Chromebook. Specifically,
+Gripper answers the following questions:
+
+- Who was logged into a specific device?
+- When were they logged in?
+- What did they do while logged in?
+
+For more information about Gripper, see :doc:`google/index`. The documentation for the Gripper code is under
+:doc:`google/apis`.
 
 
 License

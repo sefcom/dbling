@@ -2,17 +2,19 @@
 """
 The case study script for the DFRWS paper.
 
-Usage: profile.py [options] -d DFXML_FILE
-       profile.py [options] -m MOUNT_POINT
+Command line::
 
-Options:
- -v   Verbose mode. Changes logging mode from INFO to DEBUG.
- -g   Show graph before searching for matches.
- -o MERL   Output results to the file MERL.
- --plain   Output results in a plain format instead of XML.
+ Usage: profile.py [options] -d DFXML_FILE
+        profile.py [options] -m MOUNT_POINT
+
+ Options:
+  -v   Verbose mode. Changes logging mode from INFO to DEBUG.
+  -g   Show graph before searching for matches.
+  -o MERL   Output results to the file MERL.
+  --plain   Output results in a plain format instead of XML.
 
 
-As a reminder, the command to mount an image is:
+As a reminder, the command to mount an image is::
 
  sudo mount -o ro,noload -t <fs_type> <img_file> </mount/point>
 """
@@ -37,6 +39,22 @@ MAX_DIST = 2**31 - 1  # 2147483647  # Assumes the distance PropertyMap will be o
 
 
 def go(start, mounted=False, verbose=False, show_graph=False, output_file=None, plain=False):
+    """Initiate the test.
+
+    :param str start: Either the path to the mount point of the image or the
+        path to the DFXML file of the image.
+    :param bool mounted: Flag indicating if ``start`` is mounted, which is
+        triggered when the ``-m`` option is given. Flag is `False` when the
+        ``-d`` option is given.
+    :param bool verbose: Flag that changes the logging mode from ``INFO`` to
+        ``DEBUG``.
+    :param bool show_graph: Show the graph before searching for matches. Set
+        when the ``-g`` option is given.
+    :param str output_file: Path to a file where the results are saved.
+    :param bool plain: When set (using the ``--plain`` option), the results
+        saved to ``output_file`` will not be in a MERL (XML) format.
+    :rtype: None
+    """
     init_logging(verbose=verbose)
     file_needs_closing = False
     if plain and output_file is None:

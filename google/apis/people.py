@@ -5,8 +5,7 @@ from util import print_json
 
 
 class PeopleAPI(GoogleAPI):
-    """Class to interact with Google People APIs.
-    """
+    """Class to interact with Google People APIs. """
 
     _service_name = 'people'
     _version = 'v1'
@@ -21,13 +20,3 @@ class PeopleAPI(GoogleAPI):
         contacts = self.service.people().connections().list(resourceName='people/me',
                                                             personFields='names,emailAddresses').execute()
         return contacts
-
-    def get_all(self):
-        """
-        method used for testing
-
-        :return: nothing
-        """
-        if True:
-            contacts = self.get_contacts()
-            print_json(contacts)
